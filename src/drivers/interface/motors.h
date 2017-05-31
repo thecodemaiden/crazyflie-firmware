@@ -63,7 +63,9 @@
   #define MOTORS_PWM_BITS           8
   #define MOTORS_PWM_PERIOD         ((1<<MOTORS_PWM_BITS) - 1)
   #define MOTORS_PWM_PRESCALE       0
-  #define MOTORS_TIM_BEEP_CLK_FREQ  (84000000L / 5)
+  #define MOTORS_PSF                8
+  #define MOTORS_SND_PRESCALE       (MOTORS_PSF -1)
+  #define MOTORS_TIM_BEEP_CLK_FREQ  (84000000L / MOTORS_PSF)
   #define MOTORS_POLARITY           TIM_OCPolarity_High
 
 // Abstraction of ST lib functions
@@ -126,62 +128,12 @@
 #define MOTORS_TEST_ON_TIME_MS    50
 #define MOTORS_TEST_DELAY_TIME_MS 150
 
-// Sound defines
-#define C4    262
-#define DES4  277
-#define D4    294
-#define ES4   311
-#define E4    330
-#define F4    349
-#define GES4  370
-#define G4    392
-#define AS4   415
-#define A4    440
-#define B4    466
-#define H4    493
-#define C5    523
-#define DES5  554
-#define D5    587
-#define ES5   622
-#define E5    659
-#define F5    698
-#define GES5  740
-#define G5    783
-#define AS5   830
-#define A5    880
-#define B5    932
-#define H5    987
-#define C6    1046
-#define DES6  1108
-#define D6    1174
-#define ES6   1244
-#define E6    1318
-#define F6    1396
-#define GES6  1479
-#define G6    1567
-#define AS6   1661
-#define A6    1760
-#define B6    1864
-#define H6    1975
-#define C7    2093
-#define DES7  2217
-#define D7    2349
-#define ES7   2489
-#define E7    2637
-#define F7    2793
-#define GES7  2959
-#define G7    3135
-#define AS7   3322
-#define A7    3520
-#define H7    3729
-#define B7    3951
-
 // Sound duration defines
 #define EIGHTS 125
 #define QUAD 250
 #define HALF 500
 #define FULL 1000
-#define STOP 0
+#define REST 0
 
 typedef enum
 {
@@ -256,6 +208,8 @@ int motorsGetRatio(uint32_t id);
  * FreeRTOS Task to test the Motors driver
  */
 void motorsTestTask(void* params);
+
+void motorsBeep(int id, bool enable, uint16_t frequency);
 
 #endif /* __MOTORS_H__ */
 

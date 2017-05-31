@@ -113,7 +113,7 @@ PARAM_ADD(PARAM_UINT16, m1, &motorPowerSet.m1)
 PARAM_ADD(PARAM_UINT16, m2, &motorPowerSet.m2)
 PARAM_ADD(PARAM_UINT16, m3, &motorPowerSet.m3)
 PARAM_ADD(PARAM_UINT16, m4, &motorPowerSet.m4)
-PARAM_GROUP_STOP(ring)
+PARAM_GROUP_STOP(motorPowerSet)
 
 LOG_GROUP_START(motor)
 LOG_ADD(LOG_INT32, m4, &motorPower.m4)

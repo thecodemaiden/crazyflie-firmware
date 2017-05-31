@@ -67,6 +67,7 @@
 
 #ifdef PLATFORM_CF2
 #include "deck.h"
+#include "motor_sound.h"
 #endif
 
 
@@ -173,6 +174,7 @@ void systemTask(void *arg)
   stabilizerInit();
 #ifdef PLATFORM_CF2
   deckInit();
+  motorSoundInit();
   #endif
   soundInit();
   memInit();

@@ -32,6 +32,7 @@
 #include "stm32fxxx.h"
 
 #include "motors.h"
+#include "music.h"
 #include "pm.h"
 
 //FreeRTOS includes
@@ -43,13 +44,12 @@
 static uint16_t motorsBLConvBitsTo16(uint16_t bits);
 static uint16_t motorsBLConv16ToBits(uint16_t bits);
 static uint16_t motorsConvBitsTo16(uint16_t bits);
-static uint16_t motorsConv16ToBits(uint16_t bits);
+//static uint16_t motorsConv16ToBits(uint16_t bits);
+static uint16_t motorsConvRatioForFrequency(uint16_t ratio, uint16_t period);
 
 uint32_t motor_ratios[] = {0, 0, 0, 0};
+uint16_t motor_periods[] = {UINT16_MAX,UINT16_MAX,UINT16_MAX,UINT16_MAX};
 
-void motorsPlayTone(uint16_t frequency, uint16_t duration_msec);
-void motorsPlayMelody(uint16_t *notes);
-void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio);
 
 #ifdef PLATFORM_CF1
 #include "motors_def_cf1.c"
@@ -66,6 +66,12 @@ static const uint16_t testsound[NBR_OF_MOTORS] = {A4, A5, F5, D5 };
 static bool isInit = false;
 
 /* Private functions */
+static uint16_t motorsConvRatioForFrequency(uint16_t ratio, uint16_t period)
+{
+    // taking the PWM period into account, map the 0x0000 - 0xffff range properly
+    if (ratio==0) return 0;
+    return (uint16_t)(((float)ratio/UINT16_MAX)*(period+1));
+}
 
 static uint16_t motorsBLConvBitsTo16(uint16_t bits)
 {
@@ -82,11 +88,12 @@ static uint16_t motorsConvBitsTo16(uint16_t bits)
   return ((bits) << (16 - MOTORS_PWM_BITS));
 }
 
+/*
 static uint16_t motorsConv16ToBits(uint16_t bits)
 {
   return ((bits) >> (16 - MOTORS_PWM_BITS) & ((1 << MOTORS_PWM_BITS) - 1));
 }
-
+*/
 /* Public functions */
 
 //Initialization. Will set all motors ratio to 0%
@@ -191,9 +198,11 @@ bool motorsTest(void)
     if (motorMap[i]->drvType == BRUSHED)
     {
 #ifdef ACTIVATE_STARTUP_SOUND
-      motorsBeep(MOTORS[i], true, testsound[i], (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / A4)/ 20);
+      motorsSetRatio(MOTORS[i], 0x07ff);
+      motorsBeep(MOTORS[i], true, testsound[i]);
       vTaskDelay(M2T(MOTORS_TEST_ON_TIME_MS));
-      motorsBeep(MOTORS[i], false, 0, 0);
+      motorsSetRatio(MOTORS[i], 0x0000);
+      motorsBeep(MOTORS[i], false, 0);
       vTaskDelay(M2T(MOTORS_TEST_DELAY_TIME_MS));
 #else
       motorsSetRatio(MOTORS[i], MOTORS_TEST_RATIO);
@@ -206,6 +215,7 @@ bool motorsTest(void)
 
   return isInit;
 }
+
 
 // Ithrust is thrust mapped for 65536 <==> 60 grams
 void motorsSetRatio(uint32_t id, uint16_t ithrust)
@@ -226,9 +236,9 @@ void motorsSetRatio(uint32_t id, uint16_t ithrust)
       float percentage = volts / supply_voltage;
       percentage = percentage > 1.0f ? 1.0f : percentage;
       ratio = percentage * UINT16_MAX;
-      motor_ratios[id] = ratio;
-
     }
+    // store the 'true' ratio for when we silence the beeps
+    motor_ratios[id] = ratio;
   #endif
     if (motorMap[id]->drvType == BRUSHLESS)
     {
@@ -236,7 +246,11 @@ void motorsSetRatio(uint32_t id, uint16_t ithrust)
     }
     else
     {
-      motorMap[id]->setCompare(motorMap[id]->tim, motorsConv16ToBits(ratio));
+      // adjust for PWM frequency
+      ratio = motorsConvRatioForFrequency(ratio, motor_periods[id]);
+      if (ratio > 0) ratio = 0x7ff;
+      //motorMap[id]->setCompare(motorMap[id]->tim, motorsConv16ToBits(ratio));
+      motorMap[id]->setCompare(motorMap[id]->tim, (ratio));
     }
   }
 }
@@ -259,15 +273,14 @@ int motorsGetRatio(uint32_t id)
 }
 
 /* Set PWM frequency for motor controller
- * This function will set all motors into a "beep"-mode,
- * each of the motor will turned on with a given ratio and frequency.
- * The higher the ratio the higher the given power to the motors.
+ * This function will set the frequency heard from a motor
+ * Setting it to false returns the frequency to ~168kHz
  * ATTENTION: To much ratio can push your crazyflie into the air and hurt you!
  * Example:
- *     motorsBeep(true, 1000, (uint16_t)(72000000L / frequency)/ 20);
- *     motorsBeep(false, 0, 0); *
+ *     motorsBeep(true, 1000);
+ *     motorsBeep(false, 0); *
  * */
-void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
+void motorsBeep(int id, bool enable, uint16_t frequency)
 {
   TIM_TimeBaseInitTypeDef  TIM_TimeBaseStructure;
 
@@ -275,54 +288,36 @@ void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
 
   TIM_TimeBaseStructInit(&TIM_TimeBaseStructure);
 
-  if (enable)
+  uint16_t period;
+  uint16_t prescale;
+
+  if (enable && frequency > 0)
   {
-    TIM_TimeBaseStructure.TIM_Prescaler = (5 - 1);
-    TIM_TimeBaseStructure.TIM_Period = (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency);
+    period = (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency);
+    prescale = MOTORS_SND_PRESCALE;
   }
   else
   {
-    TIM_TimeBaseStructure.TIM_Period = motorMap[id]->timPeriod;
-    TIM_TimeBaseStructure.TIM_Prescaler = motorMap[id]->timPrescaler;
+    period = motorMap[id]->timPeriod;
+    prescale = motorMap[id]->timPrescaler;
   }
+    TIM_TimeBaseStructure.TIM_Period = period;
+    TIM_TimeBaseStructure.TIM_Prescaler = prescale;
+    motor_periods[id] = period;
 
   // Timer configuration
+  uint16_t ratio = motorsConvRatioForFrequency(motor_ratios[id], period);
   TIM_TimeBaseInit(motorMap[id]->tim, &TIM_TimeBaseStructure);
   motorMap[id]->setCompare(motorMap[id]->tim, ratio);
 }
 
-
-// Play a tone with a given frequency and a specific duration in milliseconds (ms)
-void motorsPlayTone(uint16_t frequency, uint16_t duration_msec)
-{
-  motorsBeep(MOTOR_M1, true, frequency, (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency)/ 20);
-  motorsBeep(MOTOR_M2, true, frequency, (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency)/ 20);
-  motorsBeep(MOTOR_M3, true, frequency, (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency)/ 20);
-  motorsBeep(MOTOR_M4, true, frequency, (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency)/ 20);
-  vTaskDelay(M2T(duration_msec));
-  motorsBeep(MOTOR_M1, false, frequency, 0);
-  motorsBeep(MOTOR_M2, false, frequency, 0);
-  motorsBeep(MOTOR_M3, false, frequency, 0);
-  motorsBeep(MOTOR_M4, false, frequency, 0);
-}
-
-// Plays a melody from a note array
-void motorsPlayMelody(uint16_t *notes)
-{
-  int i = 0;
-  uint16_t note;      // Note in hz
-  uint16_t duration;  // Duration in ms
-
-  do
-  {
-    note = notes[i++];
-    duration = notes[i++];
-    motorsPlayTone(note, duration);
-  } while (duration != 0);
-}
 LOG_GROUP_START(pwm)
 LOG_ADD(LOG_UINT32, m1_pwm, &motor_ratios[0])
 LOG_ADD(LOG_UINT32, m2_pwm, &motor_ratios[1])
 LOG_ADD(LOG_UINT32, m3_pwm, &motor_ratios[2])
 LOG_ADD(LOG_UINT32, m4_pwm, &motor_ratios[3])
+LOG_ADD(LOG_UINT16, m1_per, &motor_periods[0])
+LOG_ADD(LOG_UINT16, m2_per, &motor_periods[1])
+LOG_ADD(LOG_UINT16, m3_per, &motor_periods[2])
+LOG_ADD(LOG_UINT16, m4_per, &motor_periods[3])
 LOG_GROUP_STOP(pwm)
