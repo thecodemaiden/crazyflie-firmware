@@ -35,6 +35,7 @@
 #include "FreeRTOS.h"
 #include "timers.h"
 
+/* Crazyflie driver includes */
 #include "config.h"
 #include "param.h"
 #include "log.h"
@@ -44,7 +45,12 @@
 
 static bool isInit=false;
 static uint16_t static_freq;
-static uint8_t static_ratio;
+static uint16_t static_ratio = 0x17f;
+static uint8_t sound_on = 1;
+
+static uint32_t m_ctr[4] = {0,0,0,0};
+static const Melody *m_ptr[4] = {NULL, NULL, NULL, NULL};
+static uint32_t m_idx[4] = {0,0,0,0};
 
 #define MOTOR0 0x1
 #define MOTOR1 0x1<<1
@@ -63,35 +69,43 @@ static Melody valkyries = {.bpm = 140, .delay = 1, .notes = {{Gb5, Q}, {B5, Q},
     {D6, E}, {Gb6, H}, 
     REPEAT}};
 
+#define ULTRA_FREQ 15000
+#define INFRA_FREQ 20
+
+static Melody ultra = {.bpm = 60, .delay=1, .notes={{ULTRA_FREQ, Q}, {OFF, H}, {ULTRA_FREQ, Q}, {OFF, Q}, REPEAT}};
+static Melody infra = {.bpm = 60, .delay=1, .notes={{INFRA_FREQ, Q}, {OFF, H}, {INFRA_FREQ, Q}, {OFF, Q}, REPEAT}};
+
 
 static xTimerHandle timer;
 
-static void motorSoundOff(uint8_t motorMask)
+static void motorSoundOff(uint32_t motorNum)
 {
-    for (int i=0; i<4; i++) {
-//        if (motorMask & 1) motorsBeep(i, false, 0);
-        motorMask >>= 1;
-    }
+  motorsBeep(motorNum, false, 0);
 }
 
-static void motorSoundTone(uint8_t motorMask, uint16_t frequency)
+static void motorSoundTone(uint32_t motorNum, uint16_t frequency)
 {
-    for (int i=0; i<4; i++) {
-  //      if (motorMask & 1) motorsBeep(i, true, frequency);
-        motorMask >>= 1;
-    }
+  if (static_ratio > 0x7ff) static_ratio = 0x7ff;
+  motorsBeep(motorNum, true, frequency);
 }
 
 static void motorSoundTimer(xTimerHandle timer)
 {
-    static uint32_t mi = 0;
-    static uint16_t waitCounter = 0;
-    if (waitCounter < 100) 
-        waitCounter++;
-    else
-        melodyplayer(&mi, &mary);
+  static uint16_t waitCounter = 0;
+  if (waitCounter < 100)  {
+      waitCounter++;
+      if (waitCounter == 100) {
+        motorsSetRatio(0, static_ratio);
+      }
+  } else {
+    if (sound_on){
+       melodyplayer(m_idx, m_ptr[0]);
+    } else {
+      motorSoundOff(MOTOR0);
+      m_idx[0] = 0;
+    }
+  }
 }
-
 
 void motorSoundInit(void)
 {
@@ -99,10 +113,12 @@ void motorSoundInit(void)
     return;
   }
 
-  timer = xTimerCreate("MotorSoundTimer", M2T(50), pdTRUE, NULL, motorSoundTimer);
+  m_ptr[0] = &infra;
+
+  timer = xTimerCreate("MtrSndT", M2T(50), pdTRUE, NULL, motorSoundTimer);
+  isInit = (timer != 0);
   xTimerStart(timer, 100);
 
-  isInit = true;
 }
 
 bool motorSoundTest(void)
@@ -111,12 +127,11 @@ bool motorSoundTest(void)
 }
 
 
-static uint32_t mcounter = 0;
 static void melodyplayer(uint32_t * mi, Melody * m) {
   uint16_t tone = m->notes[(*mi)].tone;
   uint16_t duration = m->notes[(*mi)].duration;
 
-  if (mcounter == 0) {
+  if (m_ctr[0] == 0) {
     if (tone == 0xFE) {
       // Turn off buzzer since we're at the end
       (*mi) = 0;
@@ -126,18 +141,14 @@ static void melodyplayer(uint32_t * mi, Melody * m) {
     } else {
       // Play current note
       motorSoundTone(MOTOR0, tone); 
-      motorsSetRatio(1, 0x0);
-      motorsBeep(1, true, tone);
-      motorsSetRatio(1, 0x7ff);
-      mcounter = (20 * 4 * 60) / (m->bpm * duration) - 1;
+      m_ctr[0] = (20 * 4 * 60) / (m->bpm * duration) - 1;
       (*mi)++;
     }
   } else {
-    if (mcounter == 1) {
+    if (m_ctr[0] == 1) {
       motorSoundOff(MOTOR0);
-      motorsBeep(1, false, 0);
     }
-    mcounter--;
+    m_ctr[0]--;
   }
 }
 
@@ -188,5 +199,6 @@ static void tilt(uint32_t counter, uint32_t * mi, Melody * melody)
 
 PARAM_GROUP_START(motorsound)
 PARAM_ADD(PARAM_UINT16, freq, &static_freq)
-PARAM_ADD(PARAM_UINT8, ratio, &static_ratio)
+PARAM_ADD(PARAM_UINT16, ratio, &static_ratio)
+PARAM_ADD(PARAM_UINT8, enable, &sound_on)
 PARAM_GROUP_STOP(motorsound)

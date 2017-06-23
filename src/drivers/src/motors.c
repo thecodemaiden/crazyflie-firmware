@@ -248,13 +248,13 @@ void motorsSetRatio(uint32_t id, uint16_t ithrust)
     {
       // adjust for PWM frequency
       ratio = motorsConvRatioForFrequency(ratio, motor_periods[id]);
-      if (ratio > 0) ratio = 0x7ff;
       //motorMap[id]->setCompare(motorMap[id]->tim, motorsConv16ToBits(ratio));
       motorMap[id]->setCompare(motorMap[id]->tim, (ratio));
     }
   }
 }
 
+// TODO: this function may be wrong...
 int motorsGetRatio(uint32_t id)
 {
   int ratio;
@@ -277,8 +277,8 @@ int motorsGetRatio(uint32_t id)
  * Setting it to false returns the frequency to ~168kHz
  * ATTENTION: To much ratio can push your crazyflie into the air and hurt you!
  * Example:
- *     motorsBeep(true, 1000);
- *     motorsBeep(false, 0); *
+ *     motorsBeep(0, true, 1000);
+ *     motorsBeep(2, false, 0); *
  * */
 void motorsBeep(int id, bool enable, uint16_t frequency)
 {
@@ -306,7 +306,12 @@ void motorsBeep(int id, bool enable, uint16_t frequency)
     motor_periods[id] = period;
 
   // Timer configuration
+  // TODO: propellers 0,1,2 are on the same timer, 3 is not
+  // so we need to change the compare for all related timers together
   uint16_t ratio = motorsConvRatioForFrequency(motor_ratios[id], period);
+
+  // turn off the motor briefly, then turn back on to avoid violence
+  motorMap[id]->setCompare(motorMap[id]->tim, 0);
   TIM_TimeBaseInit(motorMap[id]->tim, &TIM_TimeBaseStructure);
   motorMap[id]->setCompare(motorMap[id]->tim, ratio);
 }

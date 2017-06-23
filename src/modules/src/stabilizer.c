@@ -140,14 +140,13 @@ static void stabilizerTask(void* param)
 
     stateController(&control, &setpoint, &sensorData, &state, tick);
 
-    checkEmergencyStopTimeout();
 
+    checkEmergencyStopTimeout();
     if (emergencyStop) {
       powerStop();
     } else {
       powerDistribution(&control);
     }
-
     tick++;
   }
 }

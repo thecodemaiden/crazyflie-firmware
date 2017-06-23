@@ -191,6 +191,7 @@ void systemTask(void *arg)
   pass &= stabilizerTest();
 #ifdef PLATFORM_CF2
   pass &= deckTest();
+  pass &= motorSoundTest();
   #endif
   pass &= soundTest();
   pass &= memTest();
