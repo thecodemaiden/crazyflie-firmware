@@ -316,6 +316,49 @@ void motorsBeep(int id, bool enable, uint16_t frequency)
   motorMap[id]->setCompare(motorMap[id]->tim, ratio);
 }
 
+void motorsSetFrequency(bool enable, uint16_t frequency)
+{
+  TIM_TimeBaseInitTypeDef  TIM_TimeBaseStructure;
+
+  TIM_TimeBaseStructInit(&TIM_TimeBaseStructure);
+  static uint16_t ratio[4];
+
+  uint16_t period;
+  uint16_t prescale;
+  int id;
+  bool turnOn = enable && frequency > 0;
+
+
+
+  // turn off the motors briefly, then turn back on to avoid violence
+  for (id = 0; id < 4; id++) {
+
+    if (turnOn)
+    {
+      period = (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency);
+      prescale = MOTORS_SND_PRESCALE;
+    }
+    else
+    {
+      period = motorMap[id]->timPeriod;
+      prescale = motorMap[id]->timPrescaler;
+    }
+
+    TIM_TimeBaseStructure.TIM_Period = period;
+    TIM_TimeBaseStructure.TIM_Prescaler = prescale;
+
+    ratio[id] = motorsConvRatioForFrequency(motor_ratios[id], period);
+    motorMap[id]->setCompare(motorMap[id]->tim, 0);
+
+    TIM_TimeBaseInit(motorMap[id]->tim, &TIM_TimeBaseStructure);
+    motor_periods[id] = period;
+  }
+
+  for (id = 0; id < 4; id++) {
+    motorMap[id]->setCompare(motorMap[id]->tim, ratio[id]);
+  }
+}
+
 LOG_GROUP_START(pwm)
 LOG_ADD(LOG_UINT32, m1_pwm, &motor_ratios[0])
 LOG_ADD(LOG_UINT32, m2_pwm, &motor_ratios[1])

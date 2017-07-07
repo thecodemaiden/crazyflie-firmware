@@ -34,7 +34,7 @@
 #include "FreeRTOS.h"
 #include "num.h"
 
-#define MIN_THRUST  0x100
+#define MIN_THRUST  16
 #define MAX_THRUST  60000
 
 /**

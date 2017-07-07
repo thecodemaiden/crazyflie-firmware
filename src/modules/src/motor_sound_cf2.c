@@ -44,18 +44,17 @@
 #include "music.h"
 
 static bool isInit=false;
-static uint16_t static_freq;
+static uint16_t static_freq = 20000;
 static uint16_t static_ratio = 0x17f;
-static uint8_t sound_on = 1;
+static uint16_t last_freq = 0;
+static bool sound_on;
+
+#ifdef PLAY_MUSIC
 
 static uint32_t m_ctr[4] = {0,0,0,0};
 static const Melody *m_ptr[4] = {NULL, NULL, NULL, NULL};
 static uint32_t m_idx[4] = {0,0,0,0};
 
-#define MOTOR0 0x1
-#define MOTOR1 0x1<<1
-#define MOTOR2 0x1<<2
-#define MOTOR3 0x1<<3
 
 static void melodyplayer(uint32_t * mi, Melody * m);
 
@@ -74,10 +73,12 @@ static Melody valkyries = {.bpm = 140, .delay = 1, .notes = {{Gb5, Q}, {B5, Q},
 
 static Melody ultra = {.bpm = 60, .delay=1, .notes={{ULTRA_FREQ, Q}, {OFF, H}, {ULTRA_FREQ, Q}, {OFF, Q}, REPEAT}};
 static Melody infra = {.bpm = 60, .delay=1, .notes={{INFRA_FREQ, Q}, {OFF, H}, {INFRA_FREQ, Q}, {OFF, Q}, REPEAT}};
+#endif
 
 
 static xTimerHandle timer;
 
+#ifdef SINGLE_MOTOR
 static void motorSoundOff(uint32_t motorNum)
 {
   motorsBeep(motorNum, false, 0);
@@ -88,21 +89,17 @@ static void motorSoundTone(uint32_t motorNum, uint16_t frequency)
   if (static_ratio > 0x7ff) static_ratio = 0x7ff;
   motorsBeep(motorNum, true, frequency);
 }
+#endif
 
 static void motorSoundTimer(xTimerHandle timer)
 {
   static uint16_t waitCounter = 0;
   if (waitCounter < 100)  {
       waitCounter++;
-      if (waitCounter == 100) {
-        motorsSetRatio(0, static_ratio);
-      }
   } else {
-    if (sound_on){
-       melodyplayer(m_idx, m_ptr[0]);
-    } else {
-      motorSoundOff(MOTOR0);
-      m_idx[0] = 0;
+    if (static_freq != last_freq) {
+      motorsSetFrequency(1, static_freq); 
+      last_freq = static_freq;
     }
   }
 }
@@ -113,7 +110,9 @@ void motorSoundInit(void)
     return;
   }
 
-  m_ptr[0] = &infra;
+#ifdef PLAY_MUSIC
+  m_ptr[0] = &ultra;
+#endif
 
   timer = xTimerCreate("MtrSndT", M2T(50), pdTRUE, NULL, motorSoundTimer);
   isInit = (timer != 0);
@@ -126,7 +125,7 @@ bool motorSoundTest(void)
   return isInit;
 }
 
-
+#ifdef PLAY_MUSIC
 static void melodyplayer(uint32_t * mi, Melody * m) {
   uint16_t tone = m->notes[(*mi)].tone;
   uint16_t duration = m->notes[(*mi)].duration;
@@ -151,6 +150,7 @@ static void melodyplayer(uint32_t * mi, Melody * m) {
     m_ctr[0]--;
   }
 }
+#endif
 
 /*
 

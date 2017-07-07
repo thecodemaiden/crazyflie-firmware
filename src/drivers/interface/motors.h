@@ -209,7 +209,15 @@ int motorsGetRatio(uint32_t id);
  */
 void motorsTestTask(void* params);
 
+/**
+* Set a single motor frequency - needs work since timers are linked
+*/
 void motorsBeep(int id, bool enable, uint16_t frequency);
+
+/**
+* Quickly set all motor frequencies
+**/
+void motorsSetFrequency(bool enable, uint16_t frequency);
 
 #endif /* __MOTORS_H__ */
 
