@@ -73,6 +73,7 @@ void powerStop()
 
 void powerDistribution(const control_t *control)
 {
+/*
   #ifdef QUAD_FORMATION_X
     int16_t r = control->roll / 2.0f;
     int16_t p = control->pitch / 2.0f;
@@ -90,7 +91,11 @@ void powerDistribution(const control_t *control)
     motorPower.m4 =  limitThrust(control->thrust + control->roll -
                                control->yaw);
   #endif
-
+*/
+    motorPower.m1 = limitThrust(control->thrust);
+    motorPower.m2 = limitThrust(control->thrust);
+    motorPower.m3 = limitThrust(control->thrust);
+    motorPower.m4 = limitThrust(control->thrust);
   if (motorSetEnable)
   {
     motorsSetRatio(MOTOR_M1, motorPowerSet.m1);
@@ -116,8 +121,8 @@ PARAM_ADD(PARAM_UINT16, m4, &motorPowerSet.m4)
 PARAM_GROUP_STOP(motorPowerSet)
 
 LOG_GROUP_START(motor)
-LOG_ADD(LOG_INT32, m4, &motorPower.m4)
 LOG_ADD(LOG_INT32, m1, &motorPower.m1)
 LOG_ADD(LOG_INT32, m2, &motorPower.m2)
 LOG_ADD(LOG_INT32, m3, &motorPower.m3)
+LOG_ADD(LOG_INT32, m4, &motorPower.m4)
 LOG_GROUP_STOP(motor)
