@@ -238,8 +238,8 @@ void motorsSetRatio(uint32_t id, uint16_t ithrust)
       ratio = percentage * UINT16_MAX;
     }
     // store the 'true' ratio for when we silence the beeps
-    motor_ratios[id] = ratio;
   #endif
+    motor_ratios[id] = ratio;
     if (motorMap[id]->drvType == BRUSHLESS)
     {
       motorMap[id]->setCompare(motorMap[id]->tim, motorsBLConv16ToBits(ratio));

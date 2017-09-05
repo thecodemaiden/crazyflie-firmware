@@ -60,9 +60,9 @@
   // The following defines gives a PWM of 8 bits at ~328KHz for a sysclock of 168MHz
   // CF2 PWM ripple is filtered better at 328kHz. At 168kHz the NCP702 regulator is affected.
   #define TIM_CLOCK_HZ 84000000
-  #define MOTORS_PWM_BITS           8
-  #define MOTORS_PWM_PERIOD         ((1<<MOTORS_PWM_BITS) - 1)
+  #define MOTORS_PWM_BITS           16
   #define MOTORS_PWM_PRESCALE       0
+  #define MOTORS_PWM_PERIOD         ((1<<MOTORS_PWM_BITS) - 1)
   #define MOTORS_PSF                128
   #define MOTORS_SND_PRESCALE       (MOTORS_PSF -1)
   #define MOTORS_TIM_BEEP_CLK_FREQ  (84000000L / MOTORS_PSF)
