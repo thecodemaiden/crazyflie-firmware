@@ -44,9 +44,8 @@
 #include "music.h"
 
 static bool isInit=false;
-static uint16_t static_freq = 20000;
-static uint16_t static_ratio = 0x17f;
-static uint16_t last_freq = 0;
+static uint16_t last_freq[4] = {0};
+static uint16_t motor_freq[4] = {20000, 20000, 20000, 20000};
 static bool sound_on;
 
 #ifdef PLAY_MUSIC
@@ -86,7 +85,6 @@ static void motorSoundOff(uint32_t motorNum)
 
 static void motorSoundTone(uint32_t motorNum, uint16_t frequency)
 {
-  if (static_ratio > 0x7ff) static_ratio = 0x7ff;
   motorsBeep(motorNum, true, frequency);
 }
 #endif
@@ -94,12 +92,15 @@ static void motorSoundTone(uint32_t motorNum, uint16_t frequency)
 static void motorSoundTimer(xTimerHandle timer)
 {
   static uint16_t waitCounter = 0;
+  uint8_t i = 0;
   if (waitCounter < 100)  {
       waitCounter++;
   } else {
-    if (static_freq != last_freq) {
-      motorsSetFrequency(1, static_freq); 
-      last_freq = static_freq;
+    for (; i<4; i++){
+	  if (motor_freq[i] != last_freq[i]) {
+	    motorsSetFrequency(i, motor_freq[i]); 
+	    last_freq[i] = motor_freq[i];
+      }
     }
   }
 }
@@ -197,8 +198,10 @@ static void tilt(uint32_t counter, uint32_t * mi, Melody * melody)
 
 */
 
-PARAM_GROUP_START(motorsound)
-PARAM_ADD(PARAM_UINT16, freq, &static_freq)
-PARAM_ADD(PARAM_UINT16, ratio, &static_ratio)
+PARAM_GROUP_START(mtrsnd)
+PARAM_ADD(PARAM_UINT16, freq1, (motor_freq))
+PARAM_ADD(PARAM_UINT16, freq2, (motor_freq+1))
+PARAM_ADD(PARAM_UINT16, freq3, (motor_freq+2))
+PARAM_ADD(PARAM_UINT16, freq4, (motor_freq+3))
 PARAM_ADD(PARAM_UINT8, enable, &sound_on)
-PARAM_GROUP_STOP(motorsound)
+PARAM_GROUP_STOP(mtrsnd)
