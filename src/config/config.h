@@ -158,8 +158,9 @@
 //The radio channel. From 0 to 125
 #define RADIO_CHANNEL 80
 #define RADIO_DATARATE RADIO_RATE_250K
+#ifndef RADIO_ADDRESS
 #define RADIO_ADDRESS 0xE7E7E7E7E7ULL
-
+#endif
 /**
  * \def ACTIVATE_AUTO_SHUTDOWN
  * Will automatically shot of system if no radio activity

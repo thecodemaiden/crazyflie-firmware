@@ -70,7 +70,8 @@ static uint16_t motorsConvRatioForFrequency(uint16_t ratio, uint16_t period)
 {
     // taking the PWM period into account, map the 0x0000 - 0xffff range properly
     if (ratio==0) return 0;
-    return (uint16_t)(((float)ratio/UINT16_MAX)*(period+1));
+    uint16_t val = (uint16_t)(((float)ratio/UINT16_MAX)*(period+1));
+    return val;
 }
 
 static uint16_t motorsBLConvBitsTo16(uint16_t bits)
@@ -88,8 +89,8 @@ static uint16_t motorsConvBitsTo16(uint16_t bits)
   return ((bits) << (16 - MOTORS_PWM_BITS));
 }
 
-/*
-static uint16_t motorsConv16ToBits(uint16_t bits)
+
+/*static uint16_t motorsConv16ToBits(uint16_t bits)
 {
   return ((bits) >> (16 - MOTORS_PWM_BITS) & ((1 << MOTORS_PWM_BITS) - 1));
 }
@@ -248,7 +249,7 @@ void motorsSetRatio(uint32_t id, uint16_t ithrust)
     {
       // adjust for PWM frequency
       ratio = motorsConvRatioForFrequency(ratio, motor_periods[id]);
-      //motorMap[id]->setCompare(motorMap[id]->tim, motorsConv16ToBits(ratio));
+      //ratio = motorsConv16ToBits(ratio);
       motorMap[id]->setCompare(motorMap[id]->tim, (ratio));
     }
   }
@@ -347,6 +348,42 @@ void motorsSetFrequency(int id, uint16_t frequency)
     motor_periods[id] = period;
 
     motorMap[id]->setCompare(motorMap[id]->tim, ratio);
+}
+
+void motorsSetAllFrequency(uint16_t frequency)
+{
+  TIM_TimeBaseInitTypeDef  TIM_TimeBaseStructure;
+
+  TIM_TimeBaseStructInit(&TIM_TimeBaseStructure);
+  uint16_t period;
+  uint16_t prescale;
+  bool turnOn = frequency > 0;
+  uint16_t ratio;
+ 
+  for (int id=0; id < NBR_OF_MOTORS; id++){
+
+    if (turnOn)
+    {
+      period = (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency);
+      prescale = MOTORS_SND_PRESCALE;
+    }
+    else
+    {
+      period = motorMap[id]->timPeriod;
+      prescale = motorMap[id]->timPrescaler;
+    }
+
+    TIM_TimeBaseStructure.TIM_Period = period;
+    TIM_TimeBaseStructure.TIM_Prescaler = prescale;
+
+    ratio = motorsConvRatioForFrequency(motor_ratios[id], period);
+    motorMap[id]->setCompare(motorMap[id]->tim, 0);
+
+    TIM_TimeBaseInit(motorMap[id]->tim, &TIM_TimeBaseStructure);
+    motor_periods[id] = period;
+
+    motorMap[id]->setCompare(motorMap[id]->tim, ratio);
+  }
 }
 
 LOG_GROUP_START(pwm)

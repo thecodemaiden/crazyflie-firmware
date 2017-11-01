@@ -45,7 +45,7 @@
 
 static bool isInit=false;
 static uint16_t last_freq[4] = {0};
-static uint16_t motor_freq[4] = {20000, 20000, 20000, 20000};
+static uint16_t motor_freq[4] = {PROP_FREQ, PROP_FREQ, PROP_FREQ, PROP_FREQ};
 static bool sound_on;
 
 #ifdef PLAY_MUSIC
@@ -92,16 +92,20 @@ static void motorSoundTone(uint32_t motorNum, uint16_t frequency)
 static void motorSoundTimer(xTimerHandle timer)
 {
   static uint16_t waitCounter = 0;
-  uint8_t i = 0;
   if (waitCounter < 100)  {
       waitCounter++;
   } else {
-    for (; i<4; i++){
-	  if (motor_freq[i] != last_freq[i]) {
-	    motorsSetFrequency(i, motor_freq[i]); 
-	    last_freq[i] = motor_freq[i];
+    //uint8_t i = 0;
+    //for (; i<4; i++){
+	  if (motor_freq[0] != last_freq[0]) {
+#ifdef MFREQ_SET_ONE
+	    motorsSetFrequency(3, motor_freq[0]);
+#else
+	    motorsSetAllFrequency(motor_freq[0]); 
+#endif
+	    last_freq[0] = motor_freq[0];
       }
-    }
+    //}
   }
 }
 

@@ -218,6 +218,7 @@ void motorsBeep(int id, bool enable, uint16_t frequency);
 * Quickly set all motor frequencies
 **/
 void motorsSetFrequency(int id, uint16_t frequency);
+void motorsSetAllFrequency(uint16_t frequency);
 
 #endif /* __MOTORS_H__ */
 
