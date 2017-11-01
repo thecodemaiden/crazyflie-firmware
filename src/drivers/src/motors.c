@@ -290,20 +290,17 @@ void motorsBeep(int id, bool enable, uint16_t frequency)
   TIM_TimeBaseStructInit(&TIM_TimeBaseStructure);
 
   uint16_t period;
-  uint16_t prescale;
 
   if (enable && frequency > 0)
   {
     period = (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency);
-    prescale = MOTORS_SND_PRESCALE;
   }
   else
   {
     period = motorMap[id]->timPeriod;
-    prescale = motorMap[id]->timPrescaler;
   }
     TIM_TimeBaseStructure.TIM_Period = period;
-    TIM_TimeBaseStructure.TIM_Prescaler = prescale;
+    TIM_TimeBaseStructure.TIM_Prescaler = motorMap[id]->timPrescaler;
     motor_periods[id] = period;
 
   // Timer configuration
@@ -311,8 +308,8 @@ void motorsBeep(int id, bool enable, uint16_t frequency)
   // so we need to change the compare for all related timers together
   uint16_t ratio = motorsConvRatioForFrequency(motor_ratios[id], period);
 
-  // turn off the motor briefly, then turn back on to avoid violence
-  motorMap[id]->setCompare(motorMap[id]->tim, 0);
+  // ??turn off the motor briefly, then turn back on to avoid violence??
+  //motorMap[id]->setCompare(motorMap[id]->tim, 0);
   TIM_TimeBaseInit(motorMap[id]->tim, &TIM_TimeBaseStructure);
   motorMap[id]->setCompare(motorMap[id]->tim, ratio);
 }
@@ -323,23 +320,21 @@ void motorsSetFrequency(int id, uint16_t frequency)
 
   TIM_TimeBaseStructInit(&TIM_TimeBaseStructure);
   uint16_t period;
-  uint16_t prescale;
   bool turnOn = frequency > 0;
   uint16_t ratio;
 
     if (turnOn)
     {
       period = (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency);
-      prescale = MOTORS_SND_PRESCALE;
     }
     else
     {
       period = motorMap[id]->timPeriod;
-      prescale = motorMap[id]->timPrescaler;
     }
 
     TIM_TimeBaseStructure.TIM_Period = period;
-    TIM_TimeBaseStructure.TIM_Prescaler = prescale;
+    TIM_TimeBaseStructure.TIM_Prescaler = motorMap[id]->timPrescaler;
+
 
     ratio = motorsConvRatioForFrequency(motor_ratios[id], period);
     motorMap[id]->setCompare(motorMap[id]->tim, 0);
@@ -356,7 +351,6 @@ void motorsSetAllFrequency(uint16_t frequency)
 
   TIM_TimeBaseStructInit(&TIM_TimeBaseStructure);
   uint16_t period;
-  uint16_t prescale;
   bool turnOn = frequency > 0;
   uint16_t ratio;
  
@@ -365,24 +359,22 @@ void motorsSetAllFrequency(uint16_t frequency)
     if (turnOn)
     {
       period = (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency);
-      prescale = MOTORS_SND_PRESCALE;
     }
     else
     {
       period = motorMap[id]->timPeriod;
-      prescale = motorMap[id]->timPrescaler;
     }
 
     TIM_TimeBaseStructure.TIM_Period = period;
-    TIM_TimeBaseStructure.TIM_Prescaler = prescale;
+    TIM_TimeBaseStructure.TIM_Prescaler = motorMap[id]->timPrescaler;
 
     ratio = motorsConvRatioForFrequency(motor_ratios[id], period);
-    motorMap[id]->setCompare(motorMap[id]->tim, 0);
-
-    TIM_TimeBaseInit(motorMap[id]->tim, &TIM_TimeBaseStructure);
     motor_periods[id] = period;
+    //motorMap[id]->setCompare(motorMap[id]->tim, 0);
 
     motorMap[id]->setCompare(motorMap[id]->tim, ratio);
+    TIM_TimeBaseInit(motorMap[id]->tim, &TIM_TimeBaseStructure);
+
   }
 }
 
