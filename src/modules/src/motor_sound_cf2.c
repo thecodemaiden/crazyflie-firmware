@@ -98,6 +98,7 @@ static void motorSoundTimer(xTimerHandle timer)
     //uint8_t i = 0;
     //for (; i<4; i++){
 	  if (motor_freq[0] != last_freq[0]) {
+#define MFREQ_SET_ONE
 #ifdef MFREQ_SET_ONE
 	    motorsSetFrequency(3, motor_freq[0]);
 #else
