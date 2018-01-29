@@ -42,6 +42,7 @@
 
 #include "config.h"
 #include "system.h"
+#include "platform.h"
 #include "configblock.h"
 #include "worker.h"
 #include "freeRTOSdebug.h"
@@ -104,7 +105,7 @@ void systemInit(void)
   DEBUG_PRINT(P_NAME " is up and running!\n");
   DEBUG_PRINT("Build %s:%s (%s) %s\n", V_SLOCAL_REVISION,
               V_SREVISION, V_STAG, (V_MODIFIED)?"MODIFIED":"CLEAN");
-  DEBUG_PRINT("I am 0x%X%X%X and I have %dKB of flash!\n",
+  DEBUG_PRINT("I am 0x%08X%08X%08X and I have %dKB of flash!\n",
               *((int*)(MCU_ID_ADDRESS+8)), *((int*)(MCU_ID_ADDRESS+4)),
               *((int*)(MCU_ID_ADDRESS+0)), *((short*)(MCU_FLASH_SIZE_ADDRESS)));
 
@@ -158,6 +159,10 @@ void systemTask(void *arg)
   deckInit();
   estimator = deckGetRequiredEstimator();
   stabilizerInit(estimator);
+  if (deckGetRequiredLowInterferenceRadioMode())
+  {
+    platformSetLowInterferenceRadioMode();
+  }
   soundInit();
   memInit();
 

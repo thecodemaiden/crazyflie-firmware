@@ -28,7 +28,9 @@
 
 #include "FreeRTOS.h"
 #include "task.h"
+
 #include "log.h"
+#include "param.h"
 #include "lpsTdoaTag.h"
 
 #include "stabilizer_types.h"
@@ -36,141 +38,262 @@
 
 #include "estimator.h"
 #include "estimator_kalman.h"
-
-
-static lpsAlgoOptions_t* options;
-
-static float uwbTdoaDistDiff[LOCODECK_NR_OF_ANCHORS];
-
-static uint8_t previousAnchor;
-static rangePacket_t rxPacketBuffer[LOCODECK_NR_OF_ANCHORS];
-static dwTime_t arrivals[LOCODECK_NR_OF_ANCHORS];
-
-static double frameTime_in_cl_A[LOCODECK_NR_OF_ANCHORS];
-static double clockCorrection_T_To_A[LOCODECK_NR_OF_ANCHORS];
-
-static uint32_t anchorStatusTimeout[LOCODECK_NR_OF_ANCHORS];
+#include "outlierFilter.h"
 
 #define MEASUREMENT_NOISE_STD 0.15f
+#define STATS_INTERVAL 500
 #define ANCHOR_OK_TIMEOUT 1500
 
-// The maximum diff in distances that we consider to be valid
-// Used to sanity check results and remove results that are wrong due to packet loss
-#define MAX_DISTANCE_DIFF (5.0f)
 
-static uint32_t statsReceivedPackets = 0;
-static uint32_t statsAcceptedAnchorDataPackets = 0;
-static uint32_t statsAcceptedPackets = 0;
+// State
+typedef struct {
+  rangePacket_t packet;
+  dwTime_t arrival;
+  double clockCorrection_T_To_A;
 
-static uint64_t timestampToUint64(const uint8_t *ts) {
-  dwTime_t timestamp = {.full = 0};
-  memcpy(timestamp.raw, ts, sizeof(timestamp.raw));
+  uint32_t anchorStatusTimeout;
+} history_t;
 
-  return timestamp.full;
+static lpsAlgoOptions_t* options;
+static uint8_t previousAnchor;
+// Holds data for the latest packet from all anchors
+static history_t history[LOCODECK_NR_OF_TDOA2_ANCHORS];
+
+
+// LPP packet handling
+lpsLppShortPacket_t lppPacket;
+bool lppPacketToSend;
+int lppPacketSendTryCounter;
+
+// Log data
+static float logUwbTdoaDistDiff[LOCODECK_NR_OF_TDOA2_ANCHORS];
+static float logClockCorrection[LOCODECK_NR_OF_TDOA2_ANCHORS];
+static uint16_t logAnchorDistance[LOCODECK_NR_OF_TDOA2_ANCHORS];
+
+
+static struct {
+  uint32_t packetsReceived;
+  uint32_t packetsSeqNrPass;
+  uint32_t packetsDataPass;
+  uint32_t packetsToEstimator;
+
+  uint16_t packetsReceivedRate;
+  uint16_t packetsSeqNrPassRate;
+  uint16_t packetsDataPassRate;
+  uint32_t packetsToEstimatorRate;
+
+  uint32_t nextStatisticsTime;
+  uint32_t previousStatisticsTime;
+} stats;
+
+static bool rangingOk;
+
+static void clearStats() {
+  stats.packetsReceived = 0;
+  stats.packetsSeqNrPass = 0;
+  stats.packetsDataPass = 0;
+  stats.packetsToEstimator = 0;
 }
 
-static uint64_t truncateToTimeStamp(uint64_t fullTimeStamp) {
-  return fullTimeStamp & 0x00FFFFFFFFFFul;
+static uint64_t truncateToLocalTimeStamp(uint64_t fullTimeStamp) {
+  return fullTimeStamp & 0x00FFFFFFFFul;
 }
 
-static void enqueueTDOA(uint8_t anchor1, uint8_t anchor2, double distanceDiff) {
+static uint64_t truncateToAnchorTimeStamp(uint64_t fullTimeStamp) {
+  return fullTimeStamp & 0x00FFFFFFFFul;
+}
+
+static void enqueueTDOA(uint8_t anchorA, uint8_t anchorB, double distanceDiff) {
+  point_t estimatedPos;
+  estimatorKalmanGetEstimatedPos(&estimatedPos);
+
   tdoaMeasurement_t tdoa = {
     .stdDev = MEASUREMENT_NOISE_STD,
     .distanceDiff = distanceDiff,
 
-    .anchorPosition[0] = options->anchorPosition[anchor1],
-    .anchorPosition[1] = options->anchorPosition[anchor2]
+    .anchorPosition[0] = options->anchorPosition[anchorA],
+    .anchorPosition[1] = options->anchorPosition[anchorB]
   };
 
-  estimatorKalmanEnqueueTDOA(&tdoa);
-}
-
-static double calcClockCorrection(const double frameTime, const double previuosFrameTime) {
-    double clockCorrection = 1.0;
-
-    if (frameTime != 0.0) {
-      clockCorrection = previuosFrameTime / frameTime;
+  if (outlierFilterValidateTdoa(&tdoa, &estimatedPos)) {
+    if (options->combinedAnchorPositionOk ||
+        (options->anchorPosition[anchorA].timestamp && options->anchorPosition[anchorB].timestamp)) {
+      stats.packetsToEstimator++;
+      estimatorKalmanEnqueueTDOA(&tdoa);
     }
-
-    return clockCorrection;
+  }
 }
 
 // The default receive time in the anchors for messages from other anchors is 0
 // and is overwritten with the actual receive time when a packet arrives.
 // That is, if no message was received the rx time will be 0.
-static bool isValidRxTime(const int64_t anchorRxTime) {
+static bool isValidTimeStamp(const int64_t anchorRxTime) {
   return anchorRxTime != 0;
+}
+
+static bool isSeqNrConsecutive(uint8_t prevSeqNr, uint8_t currentSeqNr) {
+  return (currentSeqNr == ((prevSeqNr + 1) & 0xff));
 }
 
 // A note on variable names. They might seem a bit verbose but express quite a lot of information
 // We have three actors: Reference anchor (Ar), Anchor n (An) and the deck on the CF called Tag (T)
-// rxAr_by_An_in_cl_An should be interpreted as "The time when packet was received from the Referecne Anchor by Anchor N expressed in the clock of Anchor N"
-static void rxcallback(dwDevice_t *dev) {
-  statsReceivedPackets++;
+// rxAr_by_An_in_cl_An should be interpreted as "The time when packet was received from the Reference
+// Anchor by Anchor N expressed in the clock of Anchor N"
+
+static bool calcClockCorrection(double* clockCorrection, const uint8_t anchor, const rangePacket_t* packet, const dwTime_t* arrival) {
+
+  if (! isSeqNrConsecutive(history[anchor].packet.sequenceNrs[anchor], packet->sequenceNrs[anchor])) {
+    return false;
+  }
+
+  const int64_t rxAn_by_T_in_cl_T = arrival->full;
+  const int64_t txAn_in_cl_An = packet->timestamps[anchor];
+  const int64_t latest_rxAn_by_T_in_cl_T = history[anchor].arrival.full;
+  const int64_t latest_txAn_in_cl_An = history[anchor].packet.timestamps[anchor];
+
+  const double frameTime_in_cl_An = truncateToAnchorTimeStamp(txAn_in_cl_An - latest_txAn_in_cl_An);
+  const double frameTime_in_T = truncateToLocalTimeStamp(rxAn_by_T_in_cl_T - latest_rxAn_by_T_in_cl_T);
+
+  *clockCorrection = frameTime_in_cl_An / frameTime_in_T;
+  return true;
+}
+
+static bool calcDistanceDiff(float* tdoaDistDiff, const uint8_t previousAnchor, const uint8_t anchor, const rangePacket_t* packet, const dwTime_t* arrival) {
+  const bool isSeqNrInTagOk = isSeqNrConsecutive(history[anchor].packet.sequenceNrs[previousAnchor], packet->sequenceNrs[previousAnchor]);
+  const bool isSeqNrInAnchorOk = isSeqNrConsecutive(history[anchor].packet.sequenceNrs[anchor], packet->sequenceNrs[anchor]);
+  if (! (isSeqNrInTagOk && isSeqNrInAnchorOk)) {
+    return false;
+  }
+  stats.packetsSeqNrPass++;
+
+  const int64_t rxAn_by_T_in_cl_T  = arrival->full;
+  const int64_t rxAr_by_An_in_cl_An = packet->timestamps[previousAnchor];
+  const int64_t tof_Ar_to_An_in_cl_An = packet->distances[previousAnchor];
+  const double clockCorrection = history[anchor].clockCorrection_T_To_A;
+
+  const bool isAnchorDistanceOk = isValidTimeStamp(tof_Ar_to_An_in_cl_An);
+  const bool isRxTimeInTagOk = isValidTimeStamp(rxAr_by_An_in_cl_An);
+  const bool isClockCorrectionOk = (clockCorrection != 0.0);
+
+  if (! (isAnchorDistanceOk && isRxTimeInTagOk && isClockCorrectionOk)) {
+    return false;
+  }
+  stats.packetsDataPass++;
+
+  const int64_t txAn_in_cl_An = packet->timestamps[anchor];
+  const int64_t rxAr_by_T_in_cl_T = history[previousAnchor].arrival.full;
+
+  const int64_t delta_txAr_to_txAn_in_cl_An = (tof_Ar_to_An_in_cl_An + truncateToAnchorTimeStamp(txAn_in_cl_An - rxAr_by_An_in_cl_An));
+  const int64_t timeDiffOfArrival_in_cl_An =  truncateToAnchorTimeStamp(rxAn_by_T_in_cl_T - rxAr_by_T_in_cl_T) * clockCorrection - delta_txAr_to_txAn_in_cl_An;
+
+  *tdoaDistDiff = SPEED_OF_LIGHT * timeDiffOfArrival_in_cl_An / LOCODECK_TS_FREQ;
+
+  return true;
+}
+
+static void addToLog(const uint8_t anchor, const uint8_t previousAnchor, const float tdoaDistDiff, const rangePacket_t* packet) {
+  // Only store diffs for anchors when we have consecutive anchor ids. In case of packet
+  // loss we can get ranging between any anchors and that messes up the graphs.
+  if (((previousAnchor + 1) & 0x07) == anchor) {
+    logUwbTdoaDistDiff[anchor] = tdoaDistDiff;
+    logAnchorDistance[anchor] = packet->distances[previousAnchor];
+  }
+}
+
+static void handleLppPacket(const int dataLength, const packet_t* rxPacket) {
+  const int32_t payloadLength = dataLength - MAC802154_HEADER_LENGTH;
+  const int32_t startOfLppDataInPayload = LPS_TDOA_LPP_HEADER;
+  const int32_t lppDataLength = payloadLength - startOfLppDataInPayload;
+
+  if (lppDataLength > 0) {
+    const uint8_t lppPacketHeader = rxPacket->payload[LPS_TDOA_LPP_HEADER];
+    if (lppPacketHeader == LPP_HEADER_SHORT_PACKET) {
+      int srcId = -1;
+
+      for (int i=0; i < LOCODECK_NR_OF_TDOA2_ANCHORS; i++) {
+        if (rxPacket->sourceAddress == options->anchorAddress[i]) {
+          srcId = i;
+          break;
+        }
+      }
+
+      if (srcId >= 0) {
+        const int32_t lppTypeAndPayloadLength = lppDataLength - 1;
+        lpsHandleLppShortPacket(srcId, &rxPacket->payload[LPS_TDOA_LPP_TYPE],
+          lppTypeAndPayloadLength);
+      }
+    }
+  }
+}
+
+// Send an LPP packet, the radio will automatically go back in RX mode
+static void sendLppShort(dwDevice_t *dev, lpsLppShortPacket_t *packet)
+{
+  static packet_t txPacket;
+  dwIdle(dev);
+
+  MAC80215_PACKET_INIT(txPacket, MAC802154_TYPE_DATA);
+
+  txPacket.payload[LPS_TDOA2_TYPE] = LPP_HEADER_SHORT_PACKET;
+  memcpy(&txPacket.payload[LPS_TDOA2_SEND_LPP_PAYLOAD], packet->data, packet->length);
+
+  txPacket.pan = 0xbccf;
+  txPacket.sourceAddress = 0xbccf000000000000 | 0xff;
+  txPacket.destAddress = options->anchorAddress[packet->dest];
+
+  dwNewTransmit(dev);
+  dwSetDefaults(dev);
+  dwSetData(dev, (uint8_t*)&txPacket, MAC802154_HEADER_LENGTH+1+packet->length);
+
+  dwWaitForResponse(dev, true);
+  dwStartTransmit(dev);
+}
+
+static bool rxcallback(dwDevice_t *dev) {
+  stats.packetsReceived++;
 
   int dataLength = dwGetDataLength(dev);
   packet_t rxPacket;
 
   dwGetData(dev, (uint8_t*)&rxPacket, dataLength);
+  const uint8_t anchor = rxPacket.sourceAddress & 0xff;
+
+  // Check if we need to send the current LPP packet
+  bool lppSent = false;
+  if (lppPacketToSend && lppPacket.dest == anchor) {
+    sendLppShort(dev, &lppPacket);
+    lppSent = true;
+  }
 
   dwTime_t arrival = {.full = 0};
   dwGetReceiveTimestamp(dev, &arrival);
 
-  const uint8_t anchor = rxPacket.sourceAddress & 0xff;
-
-  if (anchor < LOCODECK_NR_OF_ANCHORS) {
+  if (anchor < LOCODECK_NR_OF_TDOA2_ANCHORS) {
     const rangePacket_t* packet = (rangePacket_t*)rxPacket.payload;
 
-    const int64_t previous_rxAn_by_T_in_cl_T  = arrivals[anchor].full;
-    const int64_t rxAn_by_T_in_cl_T  = arrival.full;
-    const int64_t previous_txAn_in_cl_An = timestampToUint64(rxPacketBuffer[anchor].timestamps[anchor]);
-    const int64_t txAn_in_cl_An = timestampToUint64(packet->timestamps[anchor]);
+    calcClockCorrection(&history[anchor].clockCorrection_T_To_A, anchor, packet, &arrival);
+    logClockCorrection[anchor] = history[anchor].clockCorrection_T_To_A;
 
     if (anchor != previousAnchor) {
-      const int64_t previuos_rxAr_by_An_in_cl_An = timestampToUint64(rxPacketBuffer[anchor].timestamps[previousAnchor]);
-      const int64_t rxAr_by_An_in_cl_An = timestampToUint64(packet->timestamps[previousAnchor]);
-      const int64_t rxAn_by_Ar_in_cl_Ar = timestampToUint64(rxPacketBuffer[previousAnchor].timestamps[anchor]);
-
-      if (isValidRxTime(previuos_rxAr_by_An_in_cl_An) && isValidRxTime(rxAr_by_An_in_cl_An) && isValidRxTime(rxAn_by_Ar_in_cl_Ar)) {
-        statsAcceptedAnchorDataPackets++;
-
-        // Caclculate clock correction from anchor to reference anchor
-        const double frameTime_in_cl_An = truncateToTimeStamp(rxAr_by_An_in_cl_An - previuos_rxAr_by_An_in_cl_An);
-        const double clockCorrection_An_To_Ar = calcClockCorrection(frameTime_in_cl_An, frameTime_in_cl_A[previousAnchor]);
-
-        const int64_t rxAr_by_T_in_cl_T  = arrivals[previousAnchor].full;
-        const int64_t txAr_in_cl_Ar = timestampToUint64(rxPacketBuffer[previousAnchor].timestamps[previousAnchor]);
-
-        // Calculate distance diff
-        const int64_t tof_Ar_to_An_in_cl_Ar = (((truncateToTimeStamp(rxAr_by_An_in_cl_An - previous_txAn_in_cl_An) * clockCorrection_An_To_Ar) - truncateToTimeStamp(txAr_in_cl_Ar - rxAn_by_Ar_in_cl_Ar))) / 2.0;
-        const int64_t delta_txAr_to_txAn_in_cl_Ar = (tof_Ar_to_An_in_cl_Ar + truncateToTimeStamp(txAn_in_cl_An - rxAr_by_An_in_cl_An) * clockCorrection_An_To_Ar);
-        const int64_t timeDiffOfArrival_in_cl_Ar =  truncateToTimeStamp(rxAn_by_T_in_cl_T - rxAr_by_T_in_cl_T) * clockCorrection_T_To_A[previousAnchor] - delta_txAr_to_txAn_in_cl_Ar;
-
-        const float tdoaDistDiff = SPEED_OF_LIGHT * timeDiffOfArrival_in_cl_Ar / LOCODECK_TS_FREQ;
-
-        // Sanity check distances in case of missed packages
-        if (tdoaDistDiff > -MAX_DISTANCE_DIFF && tdoaDistDiff < MAX_DISTANCE_DIFF) {
-          uwbTdoaDistDiff[anchor] = tdoaDistDiff;
-
-          enqueueTDOA(previousAnchor, anchor, tdoaDistDiff);
-
-          statsAcceptedPackets++;
-        }
+      float tdoaDistDiff = 0.0;
+      if (calcDistanceDiff(&tdoaDistDiff, previousAnchor, anchor, packet, &arrival)) {
+        rangingOk = true;
+        enqueueTDOA(previousAnchor, anchor, tdoaDistDiff);
+        addToLog(anchor, previousAnchor, tdoaDistDiff, packet);
       }
     }
 
-    // Calculate clock correction for tag to anchor
-    const double frameTime_in_T = truncateToTimeStamp(rxAn_by_T_in_cl_T - previous_rxAn_by_T_in_cl_T);
-    frameTime_in_cl_A[anchor] = truncateToTimeStamp(txAn_in_cl_An - previous_txAn_in_cl_An);
-    clockCorrection_T_To_A[anchor] = calcClockCorrection(frameTime_in_T, frameTime_in_cl_A[anchor]);
+    history[anchor].arrival.full = arrival.full;
+    memcpy(&history[anchor].packet, packet, sizeof(rangePacket_t));
 
-    arrivals[anchor].full = arrival.full;
-    memcpy(&rxPacketBuffer[anchor], rxPacket.payload, sizeof(rangePacket_t));
-
-    anchorStatusTimeout[anchor] = xTaskGetTickCount() + ANCHOR_OK_TIMEOUT;
+    history[anchor].anchorStatusTimeout = xTaskGetTickCount() + ANCHOR_OK_TIMEOUT;
 
     previousAnchor = anchor;
+
+    handleLppPacket(dataLength, &rxPacket);
   }
+
+  return lppSent;
 }
 
 static void setRadioInReceiveMode(dwDevice_t *dev) {
@@ -182,8 +305,22 @@ static void setRadioInReceiveMode(dwDevice_t *dev) {
 static uint32_t onEvent(dwDevice_t *dev, uwbEvent_t event) {
   switch(event) {
     case eventPacketReceived:
-      rxcallback(dev);
-      setRadioInReceiveMode(dev);
+      if (rxcallback(dev)) {
+        lppPacketToSend = false;
+      } else {
+        setRadioInReceiveMode(dev);
+
+        // Discard lpp packet if we cannot send it for too long
+        if (++lppPacketSendTryCounter >= TDOA2_LPP_PACKET_SEND_TIMEOUT) {
+          lppPacketToSend = false;
+        }
+      }
+
+      if (!lppPacketToSend) {
+        // Get next lpp packet
+        lppPacketToSend = lpsGetLppShort(&lppPacket);
+        lppPacketSendTryCounter = 0;
+      }
       break;
     case eventTimeout:
       setRadioInReceiveMode(dev);
@@ -191,17 +328,33 @@ static uint32_t onEvent(dwDevice_t *dev, uwbEvent_t event) {
     case eventReceiveTimeout:
       setRadioInReceiveMode(dev);
       break;
+    case eventPacketSent:
+      // Service packet sent, the radio is back to receive automatically
+      break;
     default:
       ASSERT_FAILED();
   }
 
   uint32_t now = xTaskGetTickCount();
+  if (now > stats.nextStatisticsTime) {
+    float interval = now - stats.previousStatisticsTime;
+    stats.packetsReceivedRate = (uint16_t)(1000.0f * stats.packetsReceived / interval);
+    stats.packetsSeqNrPassRate = (uint16_t)(1000.0f * stats.packetsSeqNrPass / interval);
+    stats.packetsDataPassRate = (uint16_t)(1000.0f * stats.packetsDataPass / interval);
+    stats.packetsToEstimatorRate = (uint16_t)(1000.0f * stats.packetsToEstimator / interval);
+
+    clearStats();
+    stats.previousStatisticsTime = now;
+    stats.nextStatisticsTime = now + STATS_INTERVAL;
+  }
+
   options->rangingState = 0;
-  for (int anchor = 0; anchor < LOCODECK_NR_OF_ANCHORS; anchor++) {
-    if (now < anchorStatusTimeout[anchor]) {
+  for (int anchor = 0; anchor < LOCODECK_NR_OF_TDOA2_ANCHORS; anchor++) {
+    if (now < history[anchor].anchorStatusTimeout) {
       options->rangingState |= (1 << anchor);
     }
   }
+
 
   return MAX_TIMEOUT;
 }
@@ -212,43 +365,77 @@ static void Initialize(dwDevice_t *dev, lpsAlgoOptions_t* algoOptions) {
   options = algoOptions;
 
   // Reset module state. Needed by unit tests
-  memset(rxPacketBuffer, 0, sizeof(rxPacketBuffer));
-  memset(arrivals, 0, sizeof(arrivals));
+  memset(history, 0, sizeof(history));
 
-  memset(frameTime_in_cl_A, 0, sizeof(frameTime_in_cl_A));
-  memset(clockCorrection_T_To_A, 0, sizeof(clockCorrection_T_To_A));
+  memset(logClockCorrection, 0, sizeof(logClockCorrection));
+  memset(logAnchorDistance, 0, sizeof(logAnchorDistance));
+  memset(logUwbTdoaDistDiff, 0, sizeof(logUwbTdoaDistDiff));
 
   previousAnchor = 0;
 
-  memset(uwbTdoaDistDiff, 0, sizeof(uwbTdoaDistDiff));
+  lppPacketToSend = false;
 
   options->rangingState = 0;
-  memset(anchorStatusTimeout, 0, sizeof(anchorStatusTimeout));
 
-  statsReceivedPackets = 0;
-  statsAcceptedAnchorDataPackets = 0;
-  statsAcceptedPackets = 0;
+  clearStats();
+  stats.packetsReceivedRate = 0;
+  stats.packetsSeqNrPassRate = 0;
+  stats.packetsDataPassRate = 0;
+  stats.packetsToEstimatorRate = 0;
+  stats.nextStatisticsTime = xTaskGetTickCount() + STATS_INTERVAL;
+  stats.previousStatisticsTime = 0;
+
+  dwSetReceiveWaitTimeout(dev, TDOA_RECEIVE_TIMEOUT);
+
+  dwCommitConfiguration(dev);
+
+  rangingOk = false;
 }
 #pragma GCC diagnostic pop
+
+static bool isRangingOk()
+{
+  return rangingOk;
+}
 
 uwbAlgorithm_t uwbTdoaTagAlgorithm = {
   .init = Initialize,
   .onEvent = onEvent,
+  .isRangingOk = isRangingOk,
 };
 
 
 LOG_GROUP_START(tdoa)
-LOG_ADD(LOG_FLOAT, d0, &uwbTdoaDistDiff[0])
-LOG_ADD(LOG_FLOAT, d1, &uwbTdoaDistDiff[1])
-LOG_ADD(LOG_FLOAT, d2, &uwbTdoaDistDiff[2])
-LOG_ADD(LOG_FLOAT, d3, &uwbTdoaDistDiff[3])
-LOG_ADD(LOG_FLOAT, d4, &uwbTdoaDistDiff[4])
-LOG_ADD(LOG_FLOAT, d5, &uwbTdoaDistDiff[5])
-LOG_ADD(LOG_FLOAT, d6, &uwbTdoaDistDiff[6])
-LOG_ADD(LOG_FLOAT, d7, &uwbTdoaDistDiff[7])
+LOG_ADD(LOG_FLOAT, d7-0, &logUwbTdoaDistDiff[0])
+LOG_ADD(LOG_FLOAT, d0-1, &logUwbTdoaDistDiff[1])
+LOG_ADD(LOG_FLOAT, d1-2, &logUwbTdoaDistDiff[2])
+LOG_ADD(LOG_FLOAT, d2-3, &logUwbTdoaDistDiff[3])
+LOG_ADD(LOG_FLOAT, d3-4, &logUwbTdoaDistDiff[4])
+LOG_ADD(LOG_FLOAT, d4-5, &logUwbTdoaDistDiff[5])
+LOG_ADD(LOG_FLOAT, d5-6, &logUwbTdoaDistDiff[6])
+LOG_ADD(LOG_FLOAT, d6-7, &logUwbTdoaDistDiff[7])
 
-LOG_ADD(LOG_UINT32, rxCnt, &statsReceivedPackets)
-LOG_ADD(LOG_UINT32, anCnt, &statsAcceptedAnchorDataPackets)
-LOG_ADD(LOG_UINT32, okCnt, &statsAcceptedPackets)
+LOG_ADD(LOG_FLOAT, cc0, &logClockCorrection[0])
+LOG_ADD(LOG_FLOAT, cc1, &logClockCorrection[1])
+LOG_ADD(LOG_FLOAT, cc2, &logClockCorrection[2])
+LOG_ADD(LOG_FLOAT, cc3, &logClockCorrection[3])
+LOG_ADD(LOG_FLOAT, cc4, &logClockCorrection[4])
+LOG_ADD(LOG_FLOAT, cc5, &logClockCorrection[5])
+LOG_ADD(LOG_FLOAT, cc6, &logClockCorrection[6])
+LOG_ADD(LOG_FLOAT, cc7, &logClockCorrection[7])
+
+LOG_ADD(LOG_UINT16, dist7-0, &logAnchorDistance[0])
+LOG_ADD(LOG_UINT16, dist0-1, &logAnchorDistance[1])
+LOG_ADD(LOG_UINT16, dist1-2, &logAnchorDistance[2])
+LOG_ADD(LOG_UINT16, dist2-3, &logAnchorDistance[3])
+LOG_ADD(LOG_UINT16, dist3-4, &logAnchorDistance[4])
+LOG_ADD(LOG_UINT16, dist4-5, &logAnchorDistance[5])
+LOG_ADD(LOG_UINT16, dist5-6, &logAnchorDistance[6])
+LOG_ADD(LOG_UINT16, dist6-7, &logAnchorDistance[7])
+
+LOG_ADD(LOG_UINT16, stRx, &stats.packetsReceivedRate)
+LOG_ADD(LOG_UINT16, stSeq, &stats.packetsSeqNrPassRate)
+LOG_ADD(LOG_UINT16, stData, &stats.packetsDataPassRate)
+LOG_ADD(LOG_UINT16, stEst, &stats.packetsToEstimatorRate)
 
 LOG_GROUP_STOP(tdoa)
