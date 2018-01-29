@@ -45,8 +45,9 @@ static uint16_t motorsBLConv16ToBits(uint16_t bits);
 static uint16_t motorsConvBitsTo16(uint16_t bits, uint16_t period);
 static uint16_t motorsConv16ToBits(uint16_t bits, uint16_t period);
 
+
 uint32_t motor_ratios[] = {0, 0, 0, 0};
-uint32_t motor_periods[] = {0, 0, 0, 0};
+uint32_t motor_periods[] = {MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD};
 
 void motorsPlayTone(uint16_t frequency, uint16_t duration_msec);
 void motorsPlayMelody(uint16_t *notes);
@@ -58,8 +59,9 @@ const MotorPerifDef** motorMap;  /* Current map configuration */
 
 const uint32_t MOTORS[] = { MOTOR_M1, MOTOR_M2, MOTOR_M3, MOTOR_M4 };
 
+#ifdef ACTIVATE_STARTUP_SOUND
 static const uint16_t testsound[NBR_OF_MOTORS] = {A4, A5, F5, D5 };
-
+#endif 
 static bool isInit = false;
 
 /* Private functions */
@@ -76,18 +78,18 @@ static uint16_t motorsBLConv16ToBits(uint16_t bits)
 
 static uint16_t motorsConvBitsTo16(uint16_t bits, uint16_t period)
 {
- // the expected range is 0-255 (if MOTORS_PWM_BITS == 8)
- // but when setting the frequency, the range is actually smaller
-  float dutyCycle = (float)(bits+1)/(period+1);
-  return (uint16_t)(dutyCycle*UINT16_MAX);
+ // given the pwm period, map the capture compare to 0-65536
+  float dutyCycle = (float)(bits)/(period+1);
+  return (uint16_t)(dutyCycle*(UINT16_MAX+1));
 }
 
 static uint16_t motorsConv16ToBits(uint16_t bits, uint16_t period)
 {
 // given the pwm period, map the ratio (0-65536) to the proper period
-  float dutyCycle = (float)bits/UINT16_MAX;
-  return (uint16_t)((period+1)*dutyCycle) - 1;
+  float dutyCycle = (float)bits/(UINT16_MAX-1);
+  return (uint16_t)((period+1)*dutyCycle);
 }
+
 
 /* Public functions */
 
@@ -132,6 +134,7 @@ void motorsInit(const MotorPerifDef** motorMapSelect)
     TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
     TIM_TimeBaseStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(motorMap[i]->tim, &TIM_TimeBaseStructure);
+    TIM_ARRPreloadConfig(motorMap[i]->tim, ENABLE);
 
     // PWM channels configuration (All identical!)
     TIM_OCInitStructure.TIM_OCMode = TIM_OCMode_PWM1;
@@ -187,12 +190,12 @@ bool motorsTest(void)
     if (motorMap[i]->drvType == BRUSHED)
     {
 #ifdef ACTIVATE_STARTUP_SOUND
-      motorsBeep(MOTORS[i], true, testsound[i], (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / A4)/ 20);
+      motorsBeep(MOTORS[i], true, testsound[i], 16000);
       vTaskDelay(M2T(MOTORS_TEST_ON_TIME_MS));
       motorsBeep(MOTORS[i], false, 0, 0);
       vTaskDelay(M2T(MOTORS_TEST_DELAY_TIME_MS));
 #else
-      motorsSetRatio(MOTORS[i], MOTORS_TEST_RATIO);
+      motorsSetRatio(MOTORS[i], 8000);
       vTaskDelay(M2T(MOTORS_TEST_ON_TIME_MS));
       motorsSetRatio(MOTORS[i], 0);
       vTaskDelay(M2T(MOTORS_TEST_DELAY_TIME_MS));
@@ -222,17 +225,16 @@ void motorsSetRatio(uint32_t id, uint16_t ithrust)
       float percentage = volts / supply_voltage;
       percentage = percentage > 1.0f ? 1.0f : percentage;
       ratio = percentage * UINT16_MAX;
-      motor_ratios[id] = ratio;
     }
   #endif
+    motor_ratios[id] = ratio;
     if (motorMap[id]->drvType == BRUSHLESS)
     {
       motorMap[id]->setCompare(motorMap[id]->tim, motorsBLConv16ToBits(ratio));
     }
     else
     {
-      uint16_t newCompare = motorsConv16ToBits(ratio, motor_periods[id]);
-      motorMap[id]->setCompare(motorMap[id]->tim, newCompare);
+      motorMap[id]->setCompare(motorMap[id]->tim, motorsConv16ToBits(ratio, motor_periods[id]));
     }
   }
 }
@@ -265,53 +267,51 @@ int motorsGetRatio(uint32_t id)
  * */
 void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
 {
-  TIM_TimeBaseInitTypeDef  TIM_TimeBaseStructure;
   uint16_t newPeriod;
+  uint16_t newRatio;
 
   ASSERT(id < NBR_OF_MOTORS);
 
-  TIM_TimeBaseStructInit(&TIM_TimeBaseStructure);
-  TIM_TimeBaseStructure.TIM_Prescaler = motorMap[id]->timPrescaler;
-
   if (enable)
   {
-    newPeriod = (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency);
+    newPeriod = (uint16_t)(MOTORS_TIM_CLK_FREQ / frequency);
+  newRatio = motorsConv16ToBits(ratio, newPeriod);
   }
   else
   {
     newPeriod = motorMap[id]->timPeriod;
+    newRatio = 0;
   }
   motor_periods[id] = newPeriod;
 
   // Timer configuration
+  motorMap[id]->setCompare(motorMap[id]->tim, 0);
   TIM_SetAutoreload(motorMap[id]->tim, newPeriod);
-  motorMap[id]->setCompare(motorMap[id]->tim, ratio);
+  motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
 }
 
 void motorsSetFrequency(uint16_t frequency)
 {
-  TIM_TimeBaseInitTypeDef  TIM_TimeBaseStructure;
-
-  TIM_TimeBaseStructInit(&TIM_TimeBaseStructure);
   uint16_t period;
   uint16_t newRatio;
   bool turnOn = frequency > 0;
  
-  for (int id=0; id < NBR_OF_MOTORS; id++){
 
     if (turnOn)
     {
-      period = (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency);
+      period = (uint16_t)(MOTORS_TIM_CLK_FREQ / frequency);
     }
     else
     {
-      period = motorMap[id]->timPeriod;
+      period = MOTORS_PWM_PERIOD;
     }
 
+  for (int id=0; id < NBR_OF_MOTORS; id++){
     motor_periods[id] = period;
 
-    TIM_SetAutoreload(motorMap[id]->tim, period);
     newRatio = motorsConv16ToBits(motor_ratios[id], period);
+    motorMap[id]->setCompare(motorMap[id]->tim, 0);
+    TIM_SetAutoreload(motorMap[id]->tim, period);
     motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
   }
 }

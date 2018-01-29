@@ -62,6 +62,7 @@
 #include "sysload.h"
 #include "deck.h"
 #include "extrx.h"
+#include "motor_sound.h"
 
 /* Private variable */
 static bool selftestPassed;
@@ -163,6 +164,8 @@ void systemTask(void *arg)
 #ifdef PROXIMITY_ENABLED
   proximityInit();
 #endif
+
+  motorSoundInit();
 
   //Test the modules
   pass &= systemTest();

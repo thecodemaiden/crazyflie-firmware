@@ -45,9 +45,17 @@
 static bool isInit=false;
 static uint16_t last_freq = 0;
 static uint16_t motor_freq = 0;
-static bool sound_on;
 
+static uint16_t chirpStartF = 12000;
+static uint16_t chirpEndF = 12500;
+static bool go_chirp = false;
+static uint8_t chirpCounter = 0;
 
+// How many 'ticks' we have in a chirp
+// Task runs every 50 ms
+#define CHIRP_LENGTH (20)
+
+static bool doing_chirp = false;
 
 static xTimerHandle timer;
 
@@ -57,11 +65,25 @@ static void motorSoundTimer(xTimerHandle timer)
   if (waitCounter < 100)  {
       waitCounter++;
   } else {
+	  if (!doing_chirp && go_chirp) {
+		doing_chirp = true;
+		chirpCounter = 0;
+		go_chirp = false;
+	} 
+	if (doing_chirp) {
+	  if (chirpCounter > CHIRP_LENGTH) {
+	    doing_chirp = false;
+	    motor_freq = 0;
+		} else {
+			motor_freq = chirpStartF + (chirpEndF-chirpStartF)*chirpCounter/CHIRP_LENGTH;
+			chirpCounter += 1;
+		}
+	}
 	  if (motor_freq != last_freq) {
 	    motorsSetFrequency(motor_freq); 
 	    last_freq= motor_freq;
-      }
-  }
+    }
+	}	  
 }
 
 void motorSoundInit(void)
@@ -81,8 +103,9 @@ bool motorSoundTest(void)
   return isInit;
 }
 
-
 PARAM_GROUP_START(mtrsnd)
-PARAM_ADD(PARAM_UINT16, freq, (&motor_freq))
-PARAM_ADD(PARAM_UINT8, enable, &sound_on)
+PARAM_ADD(PARAM_UINT16, freq, &motor_freq)
+PARAM_ADD(PARAM_UINT16, chirpF1, &chirpStartF)
+PARAM_ADD(PARAM_UINT16, chirpF2, &chirpEndF)
+PARAM_ADD(PARAM_UINT8, goChirp, &go_chirp)
 PARAM_GROUP_STOP(mtrsnd)
