@@ -45,8 +45,8 @@
 // CF2 PWM ripple is filtered better at 328kHz. At 168kHz the NCP702 regulator is affected.
 #define TIM_CLOCK_HZ 84000000
 #define MOTORS_PWM_BITS           8
-#define MOTORS_PWM_PERIOD         100 // 52500Hz
-#define MOTORS_PWM_PRESCALE       15
+#define MOTORS_PWM_PERIOD         256 // 
+#define MOTORS_PWM_PRESCALE       0
 #define MOTORS_TIM_CLK_FREQ  (84000000L / (MOTORS_PWM_PRESCALE +1))
 #define MOTORS_POLARITY           TIM_OCPolarity_High
 
@@ -235,7 +235,7 @@ int motorsGetRatio(uint32_t id);
  */
 void motorsTestTask(void* params);
 
-void motorsSetFrequency(uint16_t frequency);
+void motorsSetFrequency(uint32_t id, uint16_t frequency);
 
 #endif /* __MOTORS_H__ */
 

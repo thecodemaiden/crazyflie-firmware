@@ -80,13 +80,13 @@ static uint16_t motorsConvBitsTo16(uint16_t bits, uint16_t period)
 {
  // given the pwm period, map the capture compare to 0-65536
   float dutyCycle = (float)(bits)/(period+1);
-  return (uint16_t)(dutyCycle*(UINT16_MAX+1));
+  return (uint16_t)(dutyCycle*(UINT16_MAX));
 }
 
 static uint16_t motorsConv16ToBits(uint16_t bits, uint16_t period)
 {
 // given the pwm period, map the ratio (0-65536) to the proper period
-  float dutyCycle = (float)bits/(UINT16_MAX-1);
+  float dutyCycle = (float)bits/(UINT16_MAX);
   return (uint16_t)((period+1)*dutyCycle);
 }
 
@@ -190,7 +190,7 @@ bool motorsTest(void)
     if (motorMap[i]->drvType == BRUSHED)
     {
 #ifdef ACTIVATE_STARTUP_SOUND
-      motorsBeep(MOTORS[i], true, testsound[i], 16000);
+      motorsBeep(MOTORS[i], true, testsound[i]*8, 12000);
       vTaskDelay(M2T(MOTORS_TEST_ON_TIME_MS));
       motorsBeep(MOTORS[i], false, 0, 0);
       vTaskDelay(M2T(MOTORS_TEST_DELAY_TIME_MS));
@@ -290,12 +290,23 @@ void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
   motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
 }
 
-void motorsSetFrequency(uint16_t frequency)
+void motorsSetFrequency(uint32_t id, uint16_t frequency)
 {
   uint16_t period;
   uint16_t newRatio;
   bool turnOn = frequency > 0;
  
+  // we have a special problem, for now
+  // motors 2 and 3 are on the same timer, so their frequency must change
+  // together
+  //
+  bool doubleChange = false;
+
+  if (id == 2 || id == 1) {
+	  id = 1; // make sure motors 2 and 3 are the same
+	  doubleChange = true;
+  }
+
 
     if (turnOn)
     {
@@ -306,14 +317,27 @@ void motorsSetFrequency(uint16_t frequency)
       period = MOTORS_PWM_PERIOD;
     }
 
-  for (int id=0; id < NBR_OF_MOTORS; id++){
-    motor_periods[id] = period;
 
-    newRatio = motorsConv16ToBits(motor_ratios[id], period);
-    motorMap[id]->setCompare(motorMap[id]->tim, 0);
-    TIM_SetAutoreload(motorMap[id]->tim, period);
-    motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
-  }
+    if (motor_periods[id] != period) {
+	    // don't make changes unless we must
+	    motor_periods[id] = period;
+
+	    newRatio = motorsConv16ToBits(motor_ratios[id], period);
+	    motorMap[id]->setCompare(motorMap[id]->tim, 0);
+	    TIM_SetAutoreload(motorMap[id]->tim, period);
+	    // TODO: will DMA avoid all timing issues?
+	    motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
+    }
+
+    if (doubleChange && (motor_periods[2] != period)) {
+      motor_periods[2] = period;
+
+      newRatio = motorsConv16ToBits(motor_ratios[2], period);
+      motorMap[2]->setCompare(motorMap[2]->tim, 0);
+      TIM_SetAutoreload(motorMap[2]->tim, period);
+      // TODO: will DMA avoid all timing issues?
+      motorMap[2]->setCompare(motorMap[2]->tim, newRatio);
+    }
 }
 
 

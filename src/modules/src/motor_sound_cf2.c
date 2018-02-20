@@ -43,16 +43,19 @@
 #include "motors.h"
 
 static bool isInit=false;
-static uint16_t last_freq = 0;
-static uint16_t motor_freq = 0;
+static uint16_t last_freq[NBR_OF_MOTORS] = {0};
+static uint16_t motor_freq[NBR_OF_MOTORS] = {0};
+static uint16_t last_chirpdF = 0;
 
-static uint16_t chirpStartF = 12000;
-static uint16_t chirpEndF = 12500;
+//static float chirpHolder = 0;
+
+static uint16_t chirpdF = 5000;
 static bool go_chirp = false;
 static uint8_t chirpCounter = 0;
 
+# define MTR_TASK_INTERVAL 50
 // How many 'ticks' we have in a chirp
-// Task runs every 50 ms
+// Task runs every MTR_TASK_INTERVAL ms
 #define CHIRP_LENGTH (20)
 
 static bool doing_chirp = false;
@@ -65,25 +68,29 @@ static void motorSoundTimer(xTimerHandle timer)
   if (waitCounter < 100)  {
       waitCounter++;
   } else {
-	  if (!doing_chirp && go_chirp) {
-		doing_chirp = true;
-		chirpCounter = 0;
-		go_chirp = false;
-	} 
-	if (doing_chirp) {
-	  if (chirpCounter > CHIRP_LENGTH) {
-	    doing_chirp = false;
-	    motor_freq = 0;
-		} else {
-			motor_freq = chirpStartF + (chirpEndF-chirpStartF)*chirpCounter/CHIRP_LENGTH;
-			chirpCounter += 1;
-		}
-	}
-	  if (motor_freq != last_freq) {
-	    motorsSetFrequency(motor_freq); 
-	    last_freq= motor_freq;
+    if (!doing_chirp && go_chirp) {
+      doing_chirp = true;
+      chirpCounter = 0;
+      last_chirpdF = chirpdF;
+      go_chirp = false;
+    } 
+    if (doing_chirp) {
+      if (chirpCounter > CHIRP_LENGTH) {
+        doing_chirp = false;
+        motor_freq[1] = 0;
+      } else {
+        //chirpHolder = 8000.0f + ((float)last_chirpdF*chirpCounter)/CHIRP_LENGTH;
+	motor_freq[1] = 10000+ 100*chirpCounter;//((uint16_t) chirpHolder);
+        chirpCounter += 1;
+      }
     }
-	}	  
+    for (int i=0; i<NBR_OF_MOTORS; i++){
+      if (motor_freq[i] != last_freq[i]) {
+        motorsSetFrequency(i, motor_freq[i]); 
+        last_freq[i]= motor_freq[i];
+      }
+    }
+  }   
 }
 
 void motorSoundInit(void)
@@ -92,7 +99,7 @@ void motorSoundInit(void)
     return;
   }
 
-  timer = xTimerCreate("MtrSndT", M2T(50), pdTRUE, NULL, motorSoundTimer);
+  timer = xTimerCreate("MtrSndT", M2T(MTR_TASK_INTERVAL), pdTRUE, NULL, motorSoundTimer);
   isInit = (timer != 0);
   xTimerStart(timer, 100);
 
@@ -104,8 +111,10 @@ bool motorSoundTest(void)
 }
 
 PARAM_GROUP_START(mtrsnd)
-PARAM_ADD(PARAM_UINT16, freq, &motor_freq)
-PARAM_ADD(PARAM_UINT16, chirpF1, &chirpStartF)
-PARAM_ADD(PARAM_UINT16, chirpF2, &chirpEndF)
+PARAM_ADD(PARAM_UINT16, f1, motor_freq)
+PARAM_ADD(PARAM_UINT16, f2, motor_freq+1)
+PARAM_ADD(PARAM_UINT16, f3, motor_freq+2)
+PARAM_ADD(PARAM_UINT16, f4, motor_freq+3)
+PARAM_ADD(PARAM_UINT16, chLen, &chirpdF)
 PARAM_ADD(PARAM_UINT8, goChirp, &go_chirp)
 PARAM_GROUP_STOP(mtrsnd)

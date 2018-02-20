@@ -25,7 +25,7 @@
  *
  * This code mainly interfacing the PWM peripheral lib of ST.
  */
-// Connector M1, PA1, TIM2_CH2
+// Connector M1, PA1, TIM5_CH2
 static const MotorPerifDef CONN_M1 =
 {
     .drvType       = BRUSHED,
@@ -34,11 +34,11 @@ static const MotorPerifDef CONN_M1 =
     .gpioPin       = GPIO_Pin_1,
     .gpioPinSource = GPIO_PinSource1,
     .gpioOType     = GPIO_OType_PP,
-    .gpioAF        = GPIO_AF_TIM2,
-    .timPerif      = RCC_APB1Periph_TIM2,
-    .tim           = TIM2,
+    .gpioAF        = GPIO_AF_TIM5,
+    .timPerif      = RCC_APB1Periph_TIM5,
+    .tim           = TIM5,
     .timPolarity   = TIM_OCPolarity_High,
-    .timDbgStop    = DBGMCU_TIM2_STOP,
+    .timDbgStop    = DBGMCU_TIM5_STOP,
     .timPeriod     = MOTORS_PWM_PERIOD,
     .timPrescaler  = MOTORS_PWM_PRESCALE,
     .setCompare    = TIM_SetCompare2,
