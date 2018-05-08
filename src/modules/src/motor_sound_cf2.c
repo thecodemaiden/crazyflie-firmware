@@ -42,55 +42,111 @@
 #include "motor_sound.h"
 #include "motors.h"
 
+// For Ubicomp, we only modulate the signal from 2 motors at once
+// Either motors M2 and M3 together (same timer) or motors M1 and
+// M4 separately
+
+
+#define DEFAULT_FREQ 11000
+#define CHIRP_LENGTH (20)
+
+
 static bool isInit=false;
-static uint16_t last_freq[NBR_OF_MOTORS] = {0};
-static uint16_t motor_freq[NBR_OF_MOTORS] = {0};
-static uint16_t last_chirpdF = 0;
+static bool monoMode = true;
 
-//static float chirpHolder = 0;
+static uint16_t lastF1 = 0;
+static uint16_t lastF2 = 0;
 
-static uint16_t chirpdF = 5000;
+static uint16_t motorF1 = 0;
+static uint16_t motorF2 = 0;
+
+static uint16_t chirpF1 = DEFAULT_FREQ;
+static uint16_t chirpF2 = DEFAULT_FREQ;
+
+// we never change the destination frequency in the middle of chirping
+static uint16_t lastChirpF1 = 0;
+static uint16_t lastChirpF2 = 0;
+static uint16_t chirpDf1 = 0;
+static uint16_t chirpDf2 = 0;
+static bool wasMono = true;
+
+static uint16_t chirpLenMs = 1000;
+static uint16_t lastChpLen = 1000;
+static int8_t chirpTicks = CHIRP_LENGTH;
+
 static bool go_chirp = false;
+static bool doing_chirp = false;
 static uint8_t chirpCounter = 0;
 
 # define MTR_TASK_INTERVAL 50
 // How many 'ticks' we have in a chirp
 // Task runs every MTR_TASK_INTERVAL ms
-#define CHIRP_LENGTH (20)
 
-static bool doing_chirp = false;
 
 static xTimerHandle timer;
 
 static void motorSoundTimer(xTimerHandle timer)
 {
   static uint16_t waitCounter = 0;
+  uint32_t accum; // just a temp variable
   if (waitCounter < 100)  {
       waitCounter++;
-  } else {
-    if (!doing_chirp && go_chirp) {
-      doing_chirp = true;
-      chirpCounter = 0;
-      last_chirpdF = chirpdF;
-      go_chirp = false;
-    } 
-    if (doing_chirp) {
-      if (chirpCounter > CHIRP_LENGTH) {
-        doing_chirp = false;
-        motor_freq[1] = 0;
-      } else {
-        //chirpHolder = 8000.0f + ((float)last_chirpdF*chirpCounter)/CHIRP_LENGTH;
-	motor_freq[1] = 10000+ 100*chirpCounter;//((uint16_t) chirpHolder);
-        chirpCounter += 1;
-      }
+      return;
+  }
+
+  // did we change the chirp length?
+  if (chirpLenMs != lastChpLen) {
+    chirpTicks = (int)((chirpLenMs+MTR_TASK_INTERVAL-1)/(MTR_TASK_INTERVAL));
+    lastChpLen = chirpLenMs;
+    if (chirpTicks < 5) chirpTicks = 5;
+  } 
+
+  if (!doing_chirp && go_chirp) {
+    doing_chirp = true;
+    go_chirp = false;
+    
+    chirpCounter = chirpTicks;
+
+    if (chirpF1 == 0) chirpF1 = DEFAULT_FREQ;
+    if (chirpF2 == 0) chirpF2 = DEFAULT_FREQ;
+
+    if (motorF1 == 0) motorF1 = chirpF1 - 2000;
+    if (motorF2 == 0) motorF2 = chirpF2 - 2000;
+
+    lastChirpF1 = chirpF1; lastChirpF2 = chirpF2;
+    chirpDf1 = chirpF1 - motorF1; chirpDf2 = chirpF2 - motorF2;
+    wasMono = monoMode;
+  }
+
+  if (doing_chirp) {
+     accum = (chirpCounter*chirpDf1)/chirpTicks;
+     motorF1 = lastChirpF1 - accum;
+     if (!wasMono) {
+        accum = (chirpCounter*chirpDf2)/chirpTicks;
+        motorF2 = lastChirpF2 - accum;
+     }
+     chirpCounter -= 1;
+     if (chirpCounter == 0) {
+       doing_chirp = false;
+     }
+  }
+
+  // whether we are chirping or not, update the motors
+    // changing either of the linked motors' frquency changes them both
+   if (lastF1 != motorF1) {
+     if (monoMode)
+       motorsSetFrequency(1, motorF1);
+     else
+       motorsSetFrequency(0, motorF1);
+
+      lastF1 = motorF1;
     }
-    for (int i=0; i<NBR_OF_MOTORS; i++){
-      if (motor_freq[i] != last_freq[i]) {
-        motorsSetFrequency(i, motor_freq[i]); 
-        last_freq[i]= motor_freq[i];
-      }
-    }
-  }   
+
+   if (!monoMode && lastF2 != motorF2) {
+     motorsSetFrequency(3, motorF2);
+     lastF2 = motorF2;
+   }
+
 }
 
 void motorSoundInit(void)
@@ -111,10 +167,12 @@ bool motorSoundTest(void)
 }
 
 PARAM_GROUP_START(mtrsnd)
-PARAM_ADD(PARAM_UINT16, f1, motor_freq)
-PARAM_ADD(PARAM_UINT16, f2, motor_freq+1)
-PARAM_ADD(PARAM_UINT16, f3, motor_freq+2)
-PARAM_ADD(PARAM_UINT16, f4, motor_freq+3)
-PARAM_ADD(PARAM_UINT16, chLen, &chirpdF)
+PARAM_ADD(PARAM_UINT16, f1, &motorF1)
+PARAM_ADD(PARAM_UINT16, f2, &motorF2)
+PARAM_ADD(PARAM_UINT16, chpF1, &chirpF1)
+PARAM_ADD(PARAM_UINT16, chpF2, &chirpF2)
+PARAM_ADD(PARAM_UINT16, chpLen, &chirpLenMs)
+
+PARAM_ADD(PARAM_UINT8, mono, &monoMode)
 PARAM_ADD(PARAM_UINT8, goChirp, &go_chirp)
 PARAM_GROUP_STOP(mtrsnd)
