@@ -66,8 +66,8 @@ static uint16_t chirpF2 = DEFAULT_FREQ;
 // we never change the destination frequency in the middle of chirping
 static uint16_t lastChirpF1 = 0;
 static uint16_t lastChirpF2 = 0;
-static uint16_t chirpDf1 = 0;
-static uint16_t chirpDf2 = 0;
+static int16_t chirpDf1 = 0;
+static int16_t chirpDf2 = 0;
 static bool wasMono = true;
 
 static uint16_t chirpLenMs = 1000;
@@ -88,7 +88,7 @@ static xTimerHandle timer;
 static void motorSoundTimer(xTimerHandle timer)
 {
   static uint16_t waitCounter = 0;
-  uint32_t accum; // just a temp variable
+  int32_t accum; // just a temp variable
   if (waitCounter < 100)  {
       waitCounter++;
       return;
@@ -111,7 +111,7 @@ static void motorSoundTimer(xTimerHandle timer)
     if (chirpF2 == 0) chirpF2 = DEFAULT_FREQ;
 
     if (motorF1 == 0) motorF1 = chirpF1 - 2000;
-    if (motorF2 == 0) motorF2 = chirpF2 - 2000;
+    if (motorF2 == 0) motorF2 = chirpF2 + 2000;
 
     lastChirpF1 = chirpF1; lastChirpF2 = chirpF2;
     chirpDf1 = chirpF1 - motorF1; chirpDf2 = chirpF2 - motorF2;
@@ -121,20 +121,20 @@ static void motorSoundTimer(xTimerHandle timer)
   if (doing_chirp) {
      accum = (chirpCounter*chirpDf1)/chirpTicks;
      motorF1 = lastChirpF1 - accum;
-     if (!wasMono) {
-        accum = (chirpCounter*chirpDf2)/chirpTicks;
-        motorF2 = lastChirpF2 - accum;
-     }
+     accum = (chirpCounter*chirpDf2)/chirpTicks;
+     motorF2 = lastChirpF2 - accum;
      chirpCounter -= 1;
      if (chirpCounter == 0) {
        doing_chirp = false;
      }
+  } else {
+    wasMono = monoMode;
   }
 
   // whether we are chirping or not, update the motors
     // changing either of the linked motors' frquency changes them both
    if (lastF1 != motorF1) {
-     if (monoMode)
+     if (wasMono)
        motorsSetFrequency(1, motorF1);
      else
        motorsSetFrequency(0, motorF1);
@@ -142,8 +142,9 @@ static void motorSoundTimer(xTimerHandle timer)
       lastF1 = motorF1;
     }
 
-   if (!monoMode && lastF2 != motorF2) {
-     motorsSetFrequency(3, motorF2);
+   if ( lastF2 != motorF2) {
+     if (!wasMono)
+	 motorsSetFrequency(3, motorF2);
      lastF2 = motorF2;
    }
 

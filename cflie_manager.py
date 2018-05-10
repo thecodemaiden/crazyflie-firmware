@@ -179,26 +179,27 @@ if __name__ == '__main__':
     # Initialize the low-level drivers (don't list the debug drivers)
     cflib.crtp.init_drivers(enable_debug_driver=False)
 
-    cflies = []
-    for n in selectedCopters:
-        copterName = urlFormat.format(n)
-        try:
-            pe = CrazyFlieManager(copterName)
-            cflies.append(pe)
-        except:
-            logger.warning("Could not create controller for {}".format(copterName))
+   # cflies = []
+   # for n in selectedCopters:
+   #     copterName = urlFormat.format(n)
+   #     try:
+   #         pe = CrazyFlieManager(copterName)
+   #         cflies.append(pe)
+   #     except:
+   #         logger.warning("Could not create controller for {}".format(copterName))
 
-    nFlies = len(cFlies)
-    nFinished = 0
+   # nFlies = len(cflies)
+   # nConnected = 0
 
-    while nConnected < nFlies:
-        for cf in cflies:
-            if cf.is_connected or cf.connection_failed: nConnected = nConnected+1        
+   # while nConnected < nFlies:
+   #     for cf in cflies:
+   #         if cf.is_connected or cf.connection_failed: nConnected = nConnected+1        
+   # 
+
+   # cflies = [cf for cf in cflies if cf.is_connected]
+    pe = CrazyflieManager(urlFormat.format(2));
+
     
-
-    cflies = [cf for cf in cflies if cf.is_connected]
-
-
     for i in range(10):
         pe._nextThrottle = 0
         time.sleep(.050)
@@ -210,29 +211,30 @@ if __name__ == '__main__':
         
     # first the tones
     for t in idxs:
-        setFreqAndWait(0, 0)
-        setFreqAndWait(1, 0)
-        setFreqAndWait(2, 0)
-        setFreqAndWait(3, 0)
+        setFreqAndWait(pe, 0, 0)
+        setFreqAndWait(pe, 1, 0)
+        setFreqAndWait(pe, 2, 0)
+        setFreqAndWait(pe, 3, 0)
         
         pe._nextThrottle = dutyCycle;
+        if doChirp:
+            pe.update_parameters(['mtrsnd.f1', 'mtrsnd.f2', 'mtrsnd.chpF1', 'mtrsnd.chpF2', 'mtrsnd.chpLen'], [10000, 14000, 12000, 13000, 1000]);
+            #setChirpParams(cp[0], cp[1])
+
         for i in range(20):
             time.sleep(.05)
-        if doChirp:
-            cp = chirpParams[t]
-            #setChirpParams(cp[0], cp[1])
 
         if doChirp:
             startChirp()
         else:
             f = sigTones[t]
-            setFreqAndWait(0, f)
-            setFreqAndWait(1, f)
+            setFreqAndWait(pe, 0, f)
+            setFreqAndWait(pe, 1, f)
         
         time.sleep(chirpLen)
 
-        setFreqAndWait(0, 0)
-        setFreqAndWait(1, 0)
+        setFreqAndWait(pe, 0, 0)
+        setFreqAndWait(pe, 1, 0)
 
         for i in range(20):
             time.sleep(.050)
