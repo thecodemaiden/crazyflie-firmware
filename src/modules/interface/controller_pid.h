@@ -7,7 +7,7 @@
  *
  * Crazyflie control firmware
  *
- * Copyright (C) 2011-2018 Bitcraze AB
+ * Copyright (C) 2011-2016 Bitcraze AB
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,15 +21,18 @@
  * You should have received a copy of the GNU General Public License
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  *
- * outlierFilter.h: Outlier rejection filter for the LPS system
+ * controller_pid.h - PID Controller Interface
  */
-
-#ifndef __OUTLIER_FILTER_H__
-#define __OUTLIER_FILTER_H__
+#ifndef __CONTROLLER_PID_H__
+#define __CONTROLLER_PID_H__
 
 #include "stabilizer_types.h"
 
-bool outlierFilterValidateTdoa(tdoaMeasurement_t* tdoa, point_t* estimatedPosition);
-void outlierFilterReset();
+void controllerPidInit(void);
+bool controllerPidTest(void);
+void controllerPid(control_t *control, setpoint_t *setpoint,
+                                         const sensorData_t *sensors,
+                                         const state_t *state,
+                                         const uint32_t tick);
 
-#endif // __OUTLIER_FILTER_H__
+#endif //__CONTROLLER_PID_H__

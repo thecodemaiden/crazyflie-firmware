@@ -158,6 +158,16 @@ static inline bool stateEstimatorHasTOFPacket(tofMeasurement_t *tof) {
   return (pdTRUE == xQueueReceive(tofDataQueue, tof, 0));
 }
 
+// Absolute height measurement along the room Z
+static xQueueHandle heightDataQueue;
+#define HEIGHT_QUEUE_LENGTH (10)
+
+static void stateEstimatorUpdateWithAbsoluteHeight(heightMeasurement_t *height);
+
+static inline bool stateEstimatorHasHeightPacket(heightMeasurement_t *height) {
+  return (pdTRUE == xQueueReceive(heightDataQueue, height, 0));
+}
+
 /**
  * Constants used in the estimator
  */
@@ -170,8 +180,6 @@ static inline bool stateEstimatorHasTOFPacket(tofMeasurement_t *tof) {
 
 //thrust is thrust mapped for 65536 <==> 60 GRAMS!
 #define CONTROL_TO_ACC (GRAVITY_MAGNITUDE*60.0f/CRAZYFLIE_WEIGHT_grams/65536.0f)
-
-#define SPEED_OF_LIGHT (299792458)
 
 // TODO: Decouple the TDOA implementation from the Kalman filter...
 #define METERS_PER_TDOATICK (4.691763979e-3f)
@@ -189,7 +197,11 @@ static inline bool stateEstimatorHasTOFPacket(tofMeasurement_t *tof) {
 #define IN_FLIGHT_TIME_THRESHOLD (500)
 
 // the reversion of pitch and roll to zero
+#ifdef LPS_2D_POSITION_HEIGHT
+#define ROLLPITCH_ZERO_REVERSION (0.0f)
+#else
 #define ROLLPITCH_ZERO_REVERSION (0.001f)
+#endif
 
 // The bounds on the covariance, these shouldn't be hit, but sometimes are... why?
 #define MAX_COVARIANCE (100)
@@ -214,6 +226,10 @@ static float procNoiseAtt = 0;
 static float measNoiseBaro = 2.0f; // meters
 static float measNoiseGyro_rollpitch = 0.1f; // radians per second
 static float measNoiseGyro_yaw = 0.1f; // radians per second
+
+static float initialX = 0.5;
+static float initialY = 0.5;
+static float initialZ = 0.0;
 
 // We track a TDOA skew as part of the Kalman filter
 static const float stdDevInitialSkew = 0.1;
@@ -463,6 +479,13 @@ void estimatorKalman(state_t *state, sensorData_t *sensors, control_t *control, 
   while (stateEstimatorHasTOFPacket(&tof))
   {
     stateEstimatorUpdateWithTof(&tof);
+    doneUpdate = true;
+  }
+
+  heightMeasurement_t height;
+  while (stateEstimatorHasHeightPacket(&height))
+  {
+    stateEstimatorUpdateWithAbsoluteHeight(&height);
     doneUpdate = true;
   }
 
@@ -725,13 +748,6 @@ static void stateEstimatorPredict(float cmdThrust, Axis3f *acc, Axis3f *gyro, fl
     S[STATE_PZ] += dt * (acc->z + gyro->y * tmpSPX - gyro->x * tmpSPY - GRAVITY_MAGNITUDE * R[2][2]);
   }
 
-  if(S[STATE_Z] < 0) {
-    S[STATE_Z] = 0;
-    S[STATE_PX] = 0;
-    S[STATE_PY] = 0;
-    S[STATE_PZ] = 0;
-  }
-
   // attitude update (rotate by gyroscope), we do this in quaternions
   // this is the gyroscope angular velocity integrated over the sample period
   float dtwx = dt*gyro->x;
@@ -917,6 +933,13 @@ static void stateEstimatorUpdateWithBaro(baro_t *baro)
 }
 #endif
 
+static void stateEstimatorUpdateWithAbsoluteHeight(heightMeasurement_t* height) {
+  float h[STATE_DIM] = {0};
+  arm_matrix_instance_f32 H = {1, STATE_DIM, h};
+  h[STATE_Z] = 1;
+  stateEstimatorScalarUpdate(&H, height->height - S[STATE_Z], height->stdDev);
+}
+
 static void stateEstimatorUpdateWithPosition(positionMeasurement_t *xyz)
 {
   // a direct measurement of states x, y, and z
@@ -939,48 +962,94 @@ static void stateEstimatorUpdateWithDistance(distanceMeasurement_t *d)
   float dy = S[STATE_Y] - d->y;
   float dz = S[STATE_Z] - d->z;
 
-  float predictedDistance = arm_sqrt(powf(dx, 2) + powf(dy, 2) + powf(dz, 2));
   float measuredDistance = d->distance;
 
-  // The measurement is: z = sqrt(dx^2 + dy^2 + dz^2). The derivative dz/dX gives h.
-  h[STATE_X] = dx/predictedDistance;
-  h[STATE_Y] = dy/predictedDistance;
-  h[STATE_Z] = dz/predictedDistance;
+  float predictedDistance = arm_sqrt(powf(dx, 2) + powf(dy, 2) + powf(dz, 2));
+  if (predictedDistance != 0.0f)
+  {
+    // The measurement is: z = sqrt(dx^2 + dy^2 + dz^2). The derivative dz/dX gives h.
+    h[STATE_X] = dx/predictedDistance;
+    h[STATE_Y] = dy/predictedDistance;
+    h[STATE_Z] = dz/predictedDistance;
+  }
+  else
+  {
+    // Avoid divide by zero
+    h[STATE_X] = 1.0f;
+    h[STATE_Y] = 0.0f;
+    h[STATE_Z] = 0.0f;
+  }
 
   stateEstimatorScalarUpdate(&H, measuredDistance-predictedDistance, d->stdDev);
 }
 
 static void stateEstimatorUpdateWithTDOA(tdoaMeasurement_t *tdoa)
 {
-  /**
-   * Measurement equation:
-   * dR = dT + d1 - d0
-   */
-
-  float measurement = tdoa->distanceDiff;
-
-  // predict based on current state
-  float x = S[STATE_X];
-  float y = S[STATE_Y];
-  float z = S[STATE_Z];
-
-  float x1 = tdoa->anchorPosition[1].x, y1 = tdoa->anchorPosition[1].y, z1 = tdoa->anchorPosition[1].z;
-  float x0 = tdoa->anchorPosition[0].x, y0 = tdoa->anchorPosition[0].y, z0 = tdoa->anchorPosition[0].z;
-
-  float d1 = sqrtf(powf(x - x1, 2) + powf(y - y1, 2) + powf(z - z1, 2));
-  float d0 = sqrtf(powf(x - x0, 2) + powf(y - y0, 2) + powf(z - z0, 2));
-
-  float predicted = d1 - d0;
-  float error = measurement - predicted;
-
   if (tdoaCount >= 100)
   {
+    /**
+     * Measurement equation:
+     * dR = dT + d1 - d0
+     */
+
+    float measurement = tdoa->distanceDiff;
+
+    // predict based on current state
+    float x = S[STATE_X];
+    float y = S[STATE_Y];
+    float z = S[STATE_Z];
+
+    float x1 = tdoa->anchorPosition[1].x, y1 = tdoa->anchorPosition[1].y, z1 = tdoa->anchorPosition[1].z;
+    float x0 = tdoa->anchorPosition[0].x, y0 = tdoa->anchorPosition[0].y, z0 = tdoa->anchorPosition[0].z;
+
+    float dx1 = x - x1;
+    float dy1 = y - y1;
+    float dz1 = z - z1;
+
+    float dx0 = x - x0;
+    float dy0 = y - y0;
+    float dz0 = z - z0;
+
+    float d1 = sqrtf(powf(dx1, 2) + powf(dy1, 2) + powf(dz1, 2));
+    float d0 = sqrtf(powf(dx0, 2) + powf(dy0, 2) + powf(dz0, 2));
+
+    float predicted = d1 - d0;
+    float error = measurement - predicted;
+
     float h[STATE_DIM] = {0};
     arm_matrix_instance_f32 H = {1, STATE_DIM, h};
 
-    h[STATE_X] = ((x - x1) / d1 - (x - x0) / d0);
-    h[STATE_Y] = ((y - y1) / d1 - (y - y0) / d0);
-    h[STATE_Z] = ((z - z1) / d1 - (z - z0) / d0);
+    // We want to do
+    // h[STATE_X] = (dx1 / d1 - dx0 / d0);
+    // h[STATE_Y] = (dy1 / d1 - dy0 / d0);
+    // h[STATE_Z] = (dz1 / d1 - dz0 / d0);
+    // but have to handle divide by zero
+
+    if (d1 != 0.0f)
+    {
+      h[STATE_X] = dx1 / d1;
+      h[STATE_Y] = dy1 / d1;
+      h[STATE_Z] = dz1 / d1;
+    }
+    else
+    {
+      h[STATE_X] = 1.0f;
+      h[STATE_Y] = 0.0f;
+      h[STATE_Z] = 0.0f;
+    }
+
+    if (d0 != 0.0f)
+    {
+      h[STATE_X] = h[STATE_X] - dx0 / d0;
+      h[STATE_Y] = h[STATE_Y] - dy0 / d0;
+      h[STATE_Z] = h[STATE_Z] - dz0 / d0;
+    }
+    else
+    {
+      h[STATE_X] = h[STATE_X] - 0.0f;
+      h[STATE_Y] = h[STATE_Y] - 1.0f;
+      h[STATE_Z] = h[STATE_Z] - 0.0f;
+    }
 
     stateEstimatorScalarUpdate(&H, error, tdoa->stdDev);
   }
@@ -1278,6 +1347,7 @@ void estimatorKalmanInit(void) {
     tdoaDataQueue = xQueueCreate(UWB_QUEUE_LENGTH, sizeof(tdoaMeasurement_t));
     flowDataQueue = xQueueCreate(FLOW_QUEUE_LENGTH, sizeof(flowMeasurement_t));
     tofDataQueue = xQueueCreate(TOF_QUEUE_LENGTH, sizeof(tofMeasurement_t));
+    heightDataQueue = xQueueCreate(HEIGHT_QUEUE_LENGTH, sizeof(heightMeasurement_t));
   }
   else
   {
@@ -1309,9 +1379,9 @@ void estimatorKalmanInit(void) {
   memset(P, 0, sizeof(S));
 
   // TODO: Can we initialize this more intelligently?
-  S[STATE_X] = 0.5;
-  S[STATE_Y] = 0.5;
-  S[STATE_Z] = 0;
+  S[STATE_X] = initialX;
+  S[STATE_Y] = initialY;
+  S[STATE_Z] = initialZ;
   S[STATE_PX] = 0;
   S[STATE_PY] = 0;
   S[STATE_PZ] = 0;
@@ -1402,6 +1472,13 @@ bool estimatorKalmanEnqueueTOF(tofMeasurement_t *tof)
   return stateEstimatorEnqueueExternalMeasurement(tofDataQueue, (void *)tof);
 }
 
+bool estimatorKalmanEnqueueAsoluteHeight(heightMeasurement_t *height)
+{
+  // A distance (height) [m] to the ground along the z axis.
+  ASSERT(isInit);
+  return stateEstimatorEnqueueExternalMeasurement(heightDataQueue, (void *)height);
+}
+
 bool estimatorKalmanTest(void)
 {
   // TODO: Figure out what we could test?
@@ -1483,4 +1560,7 @@ PARAM_GROUP_START(kalman)
   PARAM_ADD(PARAM_FLOAT, mNBaro, &measNoiseBaro)
   PARAM_ADD(PARAM_FLOAT, mNGyro_rollpitch, &measNoiseGyro_rollpitch)
   PARAM_ADD(PARAM_FLOAT, mNGyro_yaw, &measNoiseGyro_yaw)
+  PARAM_ADD(PARAM_FLOAT, initialX, &initialX)
+  PARAM_ADD(PARAM_FLOAT, initialY, &initialY)
+  PARAM_ADD(PARAM_FLOAT, initialZ, &initialZ)
 PARAM_GROUP_STOP(kalman)

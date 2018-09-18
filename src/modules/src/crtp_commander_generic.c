@@ -70,6 +70,7 @@ enum packet_type {
   altHoldType       = 4,
   hoverType         = 5,
   fullStateType     = 6,
+  positionType      = 7,
 };
 
 /* ---===== 2 - Decoding functions =====--- */
@@ -110,7 +111,7 @@ static void velocityDecoder(setpoint_t *setpoint, uint8_t type, const void *data
 
   setpoint->mode.yaw = modeVelocity;
 
-  setpoint->attitudeRate.yaw = values->yawrate;
+  setpoint->attitudeRate.yaw = -values->yawrate;
 }
 
 /* zDistanceDecoder
@@ -126,8 +127,8 @@ static void zDistanceDecoder(setpoint_t *setpoint, uint8_t type, const void *dat
 {
   const struct zDistancePacket_s *values = data;
 
-  ASSERT(datalen == sizeof(struct velocityPacket_s));
 
+  ASSERT(datalen == sizeof(struct zDistancePacket_s));
 
   setpoint->mode.z = modeAbs;
 
@@ -136,7 +137,7 @@ static void zDistanceDecoder(setpoint_t *setpoint, uint8_t type, const void *dat
 
   setpoint->mode.yaw = modeVelocity;
 
-  setpoint->attitudeRate.yaw = values->yawrate;
+  setpoint->attitudeRate.yaw = -values->yawrate;
 
 
   setpoint->mode.roll = modeAbs;
@@ -244,7 +245,7 @@ static void altHoldDecoder(setpoint_t *setpoint, uint8_t type, const void *data,
 {
   const struct altHoldPacket_s *values = data;
 
-  ASSERT(datalen == sizeof(struct velocityPacket_s));
+  ASSERT(datalen == sizeof(struct altHoldPacket_s));
 
 
   setpoint->mode.z = modeVelocity;
@@ -254,7 +255,7 @@ static void altHoldDecoder(setpoint_t *setpoint, uint8_t type, const void *data,
 
   setpoint->mode.yaw = modeVelocity;
 
-  setpoint->attitudeRate.yaw = values->yawrate;
+  setpoint->attitudeRate.yaw = -values->yawrate;
 
 
   setpoint->mode.roll = modeAbs;
@@ -277,14 +278,14 @@ static void hoverDecoder(setpoint_t *setpoint, uint8_t type, const void *data, s
 {
   const struct hoverPacket_s *values = data;
 
-  ASSERT(datalen == sizeof(struct velocityPacket_s));
+  ASSERT(datalen == sizeof(struct hoverPacket_s));
 
   setpoint->mode.z = modeAbs;
   setpoint->position.z = values->zDistance;
 
 
   setpoint->mode.yaw = modeVelocity;
-  setpoint->attitudeRate.yaw = values->yawrate;
+  setpoint->attitudeRate.yaw = -values->yawrate;
 
 
   setpoint->mode.x = modeVelocity;
@@ -339,6 +340,33 @@ static void fullStateDecoder(setpoint_t *setpoint, uint8_t type, const void *dat
   setpoint->mode.yaw = modeDisable;
 }
 
+/* positionDecoder
+ * Set the absolute postition and orientation
+ */
+ struct positionPacket_s {
+   float x;     // Position in m
+   float y;
+   float z;
+   float yaw;   // Orientation in degree
+ } __attribute__((packed));
+static void positionDecoder(setpoint_t *setpoint, uint8_t type, const void *data, size_t datalen)
+{
+  const struct positionPacket_s *values = data;
+
+  setpoint->mode.x = modeAbs;
+  setpoint->mode.y = modeAbs;
+  setpoint->mode.z = modeAbs;
+
+  setpoint->position.x = values->x;
+  setpoint->position.y = values->y;
+  setpoint->position.z = values->z;
+
+
+  setpoint->mode.yaw = modeAbs;
+
+  setpoint->attitude.yaw = values->yaw;
+}
+
  /* ---===== 3 - packetDecoders array =====--- */
 const static packetDecoder_t packetDecoders[] = {
   [stopType]          = stopDecoder,
@@ -348,6 +376,7 @@ const static packetDecoder_t packetDecoders[] = {
   [altHoldType]       = altHoldDecoder,
   [hoverType]         = hoverDecoder,
   [fullStateType]     = fullStateDecoder,
+  [positionType]      = positionDecoder,
 };
 
 /* Decoder switch */

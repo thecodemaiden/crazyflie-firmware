@@ -5,6 +5,7 @@
 #include "attitude_controller.h"
 #include "sensfusion6.h"
 #include "position_controller.h"
+#include "controller_pid.h"
 
 #include "log.h"
 #include "param.h"
@@ -17,13 +18,13 @@ static attitude_t attitudeDesired;
 static attitude_t rateDesired;
 static float actuatorThrust;
 
-void stateControllerInit(void)
+void controllerPidInit(void)
 {
   attitudeControllerInit(ATTITUDE_UPDATE_DT);
   positionControllerInit();
 }
 
-bool stateControllerTest(void)
+bool controllerPidTest(void)
 {
   bool pass = true;
 
@@ -32,7 +33,7 @@ bool stateControllerTest(void)
   return pass;
 }
 
-void stateController(control_t *control, setpoint_t *setpoint,
+void controllerPid(control_t *control, setpoint_t *setpoint,
                                          const sensorData_t *sensors,
                                          const state_t *state,
                                          const uint32_t tick)
@@ -40,7 +41,7 @@ void stateController(control_t *control, setpoint_t *setpoint,
   if (RATE_DO_EXECUTE(ATTITUDE_RATE, tick)) {
     // Rate-controled YAW is moving YAW angle setpoint
     if (setpoint->mode.yaw == modeVelocity) {
-       attitudeDesired.yaw -= setpoint->attitudeRate.yaw/500.0f;
+       attitudeDesired.yaw += setpoint->attitudeRate.yaw * ATTITUDE_UPDATE_DT;
       while (attitudeDesired.yaw > 180.0f)
         attitudeDesired.yaw -= 360.0f;
       while (attitudeDesired.yaw < -180.0f)
