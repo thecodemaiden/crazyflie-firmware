@@ -35,6 +35,7 @@
 #include "debug.h"
 #include "log.h"
 #include "param.h"
+#include "range.h"
 
 #include "i2cdev.h"
 #include "zranger2.h"
@@ -43,8 +44,7 @@
 #include "stabilizer_types.h"
 
 #include "estimator.h"
-#include "estimator_kalman.h"
-#include "arm_math.h"
+#include "cf_math.h"
 
 // Measurement noise model
 static float expPointA = 2.5f;
@@ -131,6 +131,7 @@ void zRanger2Task(void* arg)
     vTaskDelayUntil(&lastWakeTime, M2T(100));
 
     range_last = zRanger2GetMeasurementAndRestart(&dev);
+    rangeSet(rangeDown, range_last / 1000.0f);
 
     // check if range is feasible and push into the kalman filter
     // the sensor should not be able to measure >5 [m], and outliers typically
@@ -142,7 +143,7 @@ void zRanger2Task(void* arg)
       tofData.timestamp = xTaskGetTickCount();
       tofData.distance = (float)range_last * 0.001f; // Scale from [mm] to [m]
       tofData.stdDev = expStdA * (1.0f  + expf( expCoeff * ( tofData.distance - expPointA)));
-      estimatorKalmanEnqueueTOF(&tofData);
+      estimatorEnqueueTOF(&tofData);
     }
   }
 }
@@ -167,6 +168,8 @@ static const DeckDriver zranger2_deck = {
   .name = "bcZRanger2",
   .usedGpio = 0x0C,
 
+  .requiredEstimator = kalmanEstimator,
+
   .init = zRanger2Init,
   .test = zRanger2Test,
 };
@@ -176,7 +179,3 @@ DECK_DRIVER(zranger2_deck);
 PARAM_GROUP_START(deck)
 PARAM_ADD(PARAM_UINT8 | PARAM_RONLY, bcZRanger2, &isInit)
 PARAM_GROUP_STOP(deck)
-
-LOG_GROUP_START(range)
-LOG_ADD(LOG_UINT16, zrange, &range_last)
-LOG_GROUP_STOP(range)

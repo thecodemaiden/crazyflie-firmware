@@ -59,9 +59,8 @@ const MotorPerifDef** motorMap;  /* Current map configuration */
 
 const uint32_t MOTORS[] = { MOTOR_M1, MOTOR_M2, MOTOR_M3, MOTOR_M4 };
 
-#ifdef ACTIVATE_STARTUP_SOUND
-static const uint16_t testsound[NBR_OF_MOTORS] = {A4, A5, F5, D5 };
-#endif 
+const uint16_t testsound[NBR_OF_MOTORS] = {A4, A5, F5, D5 };
+
 static bool isInit = false;
 
 /* Private functions */
@@ -256,15 +255,6 @@ int motorsGetRatio(uint32_t id)
   return ratio;
 }
 
-/* Set PWM frequency for motor controller
- * This function will set all motors into a "beep"-mode,
- * each of the motor will turned on with a given ratio and frequency.
- * The higher the ratio the higher the given power to the motors.
- * ATTENTION: To much ratio can push your crazyflie into the air and hurt you!
- * Example:
- *     motorsBeep(true, 1000, (uint16_t)(72000000L / frequency)/ 20);
- *     motorsBeep(false, 0, 0); *
- * */
 void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
 {
   uint16_t newPeriod;

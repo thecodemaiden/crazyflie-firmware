@@ -1,6 +1,7 @@
-# Crazyflie 2.0 Firmware  [![Build Status](https://api.travis-ci.org/bitcraze/crazyflie-firmware.svg)](https://travis-ci.org/bitcraze/crazyflie-firmware)
+# Crazyflie Firmware  [![Build Status](https://api.travis-ci.org/bitcraze/crazyflie-firmware.svg)](https://travis-ci.org/bitcraze/crazyflie-firmware)
 
-This project contains the source code for the Crazyflie 2.0 firmware.
+This project contains the source code for the firmware used in the Crazyflie range of platforms, including
+the Crazyflie 2.X and the Roadrunner.
 
 ### Crazyflie 1.0 support
 
@@ -24,26 +25,25 @@ brew install gcc-arm-none-eabi
 
 #### Debian/Ubuntu
 
-Tested on Ubuntu 14.04 64b and Ubuntu 16.04 64b:
+Tested on Ubuntu 14.04 64b, Ubuntu 16.04 64b, and Ubuntu 18.04 64b:
 
-For ubuntu 14.04 :
+For Ubuntu 14.04 :
 
 ```bash
 sudo add-apt-repository ppa:terry.guo/gcc-arm-embedded
-```
-
-For ubuntu 16.04 :
-
-```bash
-sudo add-apt-repository ppa:team-gcc-arm-embedded/ppa
-```
-
-After adding the corresponding repositories, execute the following commands
-
-```bash
 sudo apt-get update
 sudo apt-get install libnewlib-arm-none-eabi
 ```
+
+For Ubuntu 16.04 and Ubuntu 18.04:
+
+```bash
+sudo add-apt-repository ppa:team-gcc-arm-embedded/ppa
+sudo apt-get update
+sudo apt install gcc-arm-embedded
+```
+
+Note: Do not use the `gcc-arm-none-eabi` package that is part of the Ubuntu repository as this is outdated.
 
 #### Arch Linux
 
@@ -59,7 +59,7 @@ Install Cygwin with [setup-x86_64.exe](https://www.cygwin.com/setup-x86_64.exe).
 
 Download the latest `gcc-arm-none-eabi-*-win32.zip` archive from [launchpad.net](https://launchpad.net/gcc-arm-embedded/+download). Create the directory `C:\cygwin64\opt\gcc-arm-none-eabi` and extract the contents of the zip file to it.
 
-Launch a Cygwin terminal and run the following to append to your ~/.bashrc file:
+Launch a Cygwin terminal and run the following to append to your `~/.bashrc` file:
 ```bash
 echo '[[ $PATH == */opt/gcc-arm-none-eabi/bin* ]] || export PATH=/opt/gcc-arm-none-eabi/bin:$PATH' >>~/.bashrc
 source ~/.bashrc
@@ -69,13 +69,13 @@ Verify the toolchain installation with `arm-none-eabi-gcc --version`
 
 ### Cloning
 
-This repository uses git submodules. Clone with the --recursive flag
+This repository uses git submodules. Clone with the `--recursive` flag
 
 ```bash
 git clone --recursive https://github.com/bitcraze/crazyflie-firmware.git
 ```
 
-If you already have cloned the repo without the --recursive option, you need to 
+If you already have cloned the repo without the `--recursive` option, you need to 
 get the submodules manually
 
 ```bash
@@ -87,21 +87,36 @@ git submodule update
 
 ## Compiling
 
-### Crazyflie 2.0
+### Crazyflie 2.X
 
-This is the default build so just running "make" is enough or:
+This is the default build so just running ```make``` is enough or:
 ```bash
-make PLATFORM=CF2
+make PLATFORM=cf2
 ```
 
 or with the toolbelt
 
 ```bash
-tb make
+tb make PLATFORM=cf2
 ```
 
+### Roadrunner
+
+Use the ```tag``` platform
+
+```bash
+make PLATFORM=tag
+```
+
+or with the toolbelt
+
+```bash
+tb make PLATFORM=tag
+```
+
+
 ### config.mk
-To create custom build options create a file called config.mk in the tools/make/
+To create custom build options create a file called `config.mk` in the `tools/make/`
 folder and fill it with options. E.g. 
 ```
 PLATFORM=CF2
@@ -109,7 +124,7 @@ DEBUG=1
 CLOAD=0
 ```
 More information can be found on the 
-[Bitcraze wiki](http://wiki.bitcraze.se/projects:crazyflie2:index)
+[Bitcraze wiki](http://wiki.bitcraze.io/projects:crazyflie2:index)
 
 ## Folder description:
 ```
@@ -119,12 +134,12 @@ More information can be found on the
  + drivers      | Hardware driver layer
  |  + src       | Drivers source code
  |  + interface | Drivers header files. Interface to the HAL layer
- + hal          | Hardware abstaction layer
+ + hal          | Hardware abstraction layer
  |  + src       | HAL source code
  |  + interface | HAL header files. Interface with the other parts of the program
  + modules      | Firmware operating code and headers
  |  + src       | Firmware tasks source code and main.c
- |  + interface | Operating headers. Configure the firmware environement
+ |  + interface | Operating headers. Configure the firmware environment
  + utils        | Utils code. Implement utility block like the console.
  |  + src       | Utils source code
  |  + interface | Utils header files. Interface with the other parts of the program
@@ -170,11 +185,11 @@ with the docker builder image and the toolbelt
        
 When working with one specific file it is often convenient to run only one unit test
        
-       make unit FILES=test/utils/src/TestNum.c
+       make unit FILES=test/utils/src/test_num.c
 
 or with the toolbelt        
 
-       tb make unit FILES=test/utils/src/TestNum.c
+       tb make unit FILES=test/utils/src/test_num.c
               
 ## Running unit tests with specific build settings
       

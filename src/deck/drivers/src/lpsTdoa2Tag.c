@@ -37,8 +37,6 @@
 #include "cfassert.h"
 
 #include "estimator.h"
-#include "estimator_kalman.h"
-#include "outlierFilter.h"
 
 #include "physicalConstants.h"
 
@@ -152,12 +150,10 @@ static void enqueueTDOA(uint8_t anchorA, uint8_t anchorB, double distanceDiff) {
     .anchorPosition[1] = options->anchorPosition[anchorB]
   };
 
-  if (outlierFilterValidateTdoa(&tdoa)) {
-    if (options->combinedAnchorPositionOk ||
-        (options->anchorPosition[anchorA].timestamp && options->anchorPosition[anchorB].timestamp)) {
-      stats.packetsToEstimator++;
-      estimatorKalmanEnqueueTDOA(&tdoa);
-    }
+  if (options->combinedAnchorPositionOk ||
+      (options->anchorPosition[anchorA].timestamp && options->anchorPosition[anchorB].timestamp)) {
+    stats.packetsToEstimator++;
+    estimatorEnqueueTDOA(&tdoa);
   }
 }
 

@@ -34,6 +34,7 @@
 #include "debug.h"
 #include "log.h"
 #include "param.h"
+#include "range.h"
 
 #include "i2cdev.h"
 #include "zranger.h"
@@ -42,8 +43,7 @@
 #include "stabilizer_types.h"
 
 #include "estimator.h"
-#include "estimator_kalman.h"
-#include "arm_math.h"
+#include "cf_math.h"
 
 // Measurement noise model
 static float expPointA = 1.0f;
@@ -102,6 +102,7 @@ void zRangerTask(void* arg)
     vTaskDelayUntil(&xLastWakeTime, M2T(dev.measurement_timing_budget_ms));
 
     range_last = vl53l0xReadRangeContinuousMillimeters(&dev);
+    rangeSet(rangeDown, range_last / 1000.0f);
 
     // check if range is feasible and push into the kalman filter
     // the sensor should not be able to measure >3 [m], and outliers typically
@@ -113,7 +114,7 @@ void zRangerTask(void* arg)
       tofData.timestamp = xTaskGetTickCount();
       tofData.distance = (float)range_last * 0.001f; // Scale from [mm] to [m]
       tofData.stdDev = expStdA * (1.0f  + expf( expCoeff * ( tofData.distance - expPointA)));
-      estimatorKalmanEnqueueTOF(&tofData);
+      estimatorEnqueueTOF(&tofData);
     }
   }
 }
@@ -147,7 +148,3 @@ DECK_DRIVER(zranger_deck);
 PARAM_GROUP_START(deck)
 PARAM_ADD(PARAM_UINT8 | PARAM_RONLY, bcZRanger, &isInit)
 PARAM_GROUP_STOP(deck)
-
-LOG_GROUP_START(range)
-LOG_ADD(LOG_UINT16, zrange, &range_last)
-LOG_GROUP_STOP(range)

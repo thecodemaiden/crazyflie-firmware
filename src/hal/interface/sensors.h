@@ -28,6 +28,8 @@
 
 #include "stabilizer_types.h"
 
+typedef enum { ACC_MODE_PROPTEST, ACC_MODE_FLIGHT } accModes;
+
 void sensorsInit(void);
 bool sensorsTest(void);
 bool sensorsAreCalibrated(void);
@@ -50,5 +52,10 @@ bool sensorsReadGyro(Axis3f *gyro);
 bool sensorsReadAcc(Axis3f *acc);
 bool sensorsReadMag(Axis3f *mag);
 bool sensorsReadBaro(baro_t *baro);
+
+/**
+ * Set acc mode, one of accModes enum
+ */
+void sensorsSetAccMode(accModes accMode);
 
 #endif //__SENSORS_H__

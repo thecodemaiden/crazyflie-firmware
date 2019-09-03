@@ -52,6 +52,7 @@ struct vec3_s {
   float z;
 };
 
+typedef struct vec3_s vector_t;
 typedef struct vec3_s point_t;
 typedef struct vec3_s velocity_t;
 typedef struct vec3_s acc_t;
@@ -99,6 +100,20 @@ typedef struct positionMeasurement_s {
   };
   float stdDev;
 } positionMeasurement_t;
+
+typedef struct poseMeasurement_s {
+  union {
+    struct {
+      float x;
+      float y;
+      float z;
+    };
+    float pos[3];
+  };
+  quaternion_t quat;
+  float stdDevPos;
+  float stdDevQuat;
+} poseMeasurement_t;
 
 typedef struct distanceMeasurement_s {
   union {
