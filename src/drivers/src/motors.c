@@ -45,13 +45,9 @@ static uint16_t motorsBLConv16ToBits(uint16_t bits);
 static uint16_t motorsConvBitsTo16(uint16_t bits, uint16_t period);
 static uint16_t motorsConv16ToBits(uint16_t bits, uint16_t period);
 
-
 uint32_t motor_ratios[] = {0, 0, 0, 0};
 uint32_t motor_periods[]= {MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD};
 
-
-void motorsPlayTone(uint16_t frequency, uint16_t duration_msec);
-void motorsPlayMelody(uint16_t *notes);
 void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio);
 
 #include "motors_def_cf2.c"
@@ -282,7 +278,7 @@ void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
   if (enable) TIM_SetAutoreload(motorMap[id]->tim, newPeriod);
 }
 
-void motorsSetFrequency(uint32_t id, uint16_t frequency)
+void motorsSetFrequency( uint16_t frequency)
 {
   // ignore the id for now
   uint16_t period;
@@ -300,8 +296,6 @@ void motorsSetFrequency(uint32_t id, uint16_t frequency)
     {
       period = MOTORS_PWM_PERIOD;
     }
-
-
 
       for (int id=0; id < NBR_OF_MOTORS; id++) {
         if (motor_periods[id] != period) {
