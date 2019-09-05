@@ -47,7 +47,8 @@ static uint16_t motorsConv16ToBits(uint16_t bits, uint16_t period);
 
 
 uint32_t motor_ratios[] = {0, 0, 0, 0};
-uint32_t motor_periods[] = {MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD};
+uint32_t motor_periods[]= {MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD};
+
 
 void motorsPlayTone(uint16_t frequency, uint16_t duration_msec);
 void motorsPlayMelody(uint16_t *notes);
@@ -59,7 +60,7 @@ const MotorPerifDef** motorMap;  /* Current map configuration */
 
 const uint32_t MOTORS[] = { MOTOR_M1, MOTOR_M2, MOTOR_M3, MOTOR_M4 };
 
-const uint16_t testsound[NBR_OF_MOTORS] = {A4, A5, F5, D5 };
+const uint16_t testsound[NBR_OF_MOTORS] = {A6, A7, F7, D7 };
 
 static bool isInit = false;
 
@@ -189,7 +190,7 @@ bool motorsTest(void)
     if (motorMap[i]->drvType == BRUSHED)
     {
 #ifdef ACTIVATE_STARTUP_SOUND
-      motorsBeep(MOTORS[i], true, testsound[i]*8, 12000);
+      motorsBeep(MOTORS[i], true, testsound[i], 12000);
       vTaskDelay(M2T(MOTORS_TEST_ON_TIME_MS));
       motorsBeep(MOTORS[i], false, 0, 0);
       vTaskDelay(M2T(MOTORS_TEST_DELAY_TIME_MS));
@@ -266,36 +267,29 @@ void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
   {
     newPeriod = (uint16_t)(MOTORS_TIM_CLK_FREQ / frequency);
   newRatio = motorsConv16ToBits(ratio, newPeriod);
+  motor_periods[id] = newPeriod;
+  TIM_SetAutoreload(motorMap[id]->tim, 0);
   }
   else
   {
-    newPeriod = motorMap[id]->timPeriod;
+    //newPeriod = motorMap[id]->timPeriod;
     newRatio = 0;
   }
-  motor_periods[id] = newPeriod;
 
   // Timer configuration
-  motorMap[id]->setCompare(motorMap[id]->tim, 0);
-  TIM_SetAutoreload(motorMap[id]->tim, newPeriod);
   motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
+
+  if (enable) TIM_SetAutoreload(motorMap[id]->tim, newPeriod);
 }
 
 void motorsSetFrequency(uint32_t id, uint16_t frequency)
 {
+  // ignore the id for now
   uint16_t period;
   uint16_t newRatio;
   bool turnOn = frequency > 0;
  
-  // we have a special problem, for now
-  // motors 2 and 3 are on the same timer, so their frequency must change
-  // together
-  //
-  bool doubleChange = false;
-
-  if (id == 2 || id == 1) {
-	  id = 1; // make sure motors 2 and 3 are the same
-	  doubleChange = true;
-  }
+  
 
 
     if (turnOn)
@@ -308,36 +302,29 @@ void motorsSetFrequency(uint32_t id, uint16_t frequency)
     }
 
 
-    if (motor_periods[id] != period) {
-	    // don't make changes unless we must
-	    motor_periods[id] = period;
+
+      for (int id=0; id < NBR_OF_MOTORS; id++) {
+        if (motor_periods[id] != period) {
+        // don't make changes unless we must
+        motor_periods[id] = period;
 
 	    newRatio = motorsConv16ToBits(motor_ratios[id], period);
-	    motorMap[id]->setCompare(motorMap[id]->tim, 0);
-	    TIM_SetAutoreload(motorMap[id]->tim, period);
+	    TIM_SetAutoreload(motorMap[id]->tim, 0);
 	    // TODO: will DMA avoid all timing issues?
 	    motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
+	    TIM_SetAutoreload(motorMap[id]->tim, period);
+      }
     }
 
-    if (doubleChange && (motor_periods[2] != period)) {
-      motor_periods[2] = period;
-
-      newRatio = motorsConv16ToBits(motor_ratios[2], period);
-      motorMap[2]->setCompare(motorMap[2]->tim, 0);
-      TIM_SetAutoreload(motorMap[2]->tim, period);
-      // TODO: will DMA avoid all timing issues?
-      motorMap[2]->setCompare(motorMap[2]->tim, newRatio);
-    }
 }
 
-
 LOG_GROUP_START(pwm)
-LOG_ADD(LOG_UINT32, m1_pwm, &motor_ratios[0])
-LOG_ADD(LOG_UINT32, m2_pwm, &motor_ratios[1])
-LOG_ADD(LOG_UINT32, m3_pwm, &motor_ratios[2])
-LOG_ADD(LOG_UINT32, m4_pwm, &motor_ratios[3])
-LOG_ADD(LOG_UINT32, m1_per, &motor_periods[0])
-LOG_ADD(LOG_UINT32, m2_per, &motor_periods[1])
-LOG_ADD(LOG_UINT32, m3_per, &motor_periods[2])
-LOG_ADD(LOG_UINT32, m4_per, &motor_periods[3])
+LOG_ADD(LOG_UINT16, rat1, motor_ratios)
+LOG_ADD(LOG_UINT16, rat2, motor_ratios+1)
+LOG_ADD(LOG_UINT16, rat3, motor_ratios+2)
+LOG_ADD(LOG_UINT16, rat4, motor_ratios+3)
+LOG_ADD(LOG_UINT16, per1, motor_periods)
+LOG_ADD(LOG_UINT16, per2, motor_periods+1)
+LOG_ADD(LOG_UINT16, per3, motor_periods+2)
+LOG_ADD(LOG_UINT16, per4, motor_periods+3)
 LOG_GROUP_STOP(pwm)
