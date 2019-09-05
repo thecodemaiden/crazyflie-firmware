@@ -47,11 +47,9 @@ static uint16_t motorsConv16ToBits(uint16_t bits, uint16_t period);
 
 
 uint32_t motor_ratios[] = {0, 0, 0, 0};
-uint32_t motor_periods[] = {MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD};
+uint32_t motor_period = MOTORS_PWM_PERIOD;
 
-void motorsPlayTone(uint16_t frequency, uint16_t duration_msec);
-void motorsPlayMelody(uint16_t *notes);
-void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio);
+//void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio);
 
 #include "motors_def_cf2.c"
 
@@ -189,7 +187,7 @@ bool motorsTest(void)
     if (motorMap[i]->drvType == BRUSHED)
     {
 #ifdef ACTIVATE_STARTUP_SOUND
-      motorsBeep(MOTORS[i], true, testsound[i]*8, 12000);
+      motorsBeep(MOTORS[i], true, testsound[i], 12000);
       vTaskDelay(M2T(MOTORS_TEST_ON_TIME_MS));
       motorsBeep(MOTORS[i], false, 0, 0);
       vTaskDelay(M2T(MOTORS_TEST_DELAY_TIME_MS));
@@ -203,6 +201,19 @@ bool motorsTest(void)
   }
 
   return isInit;
+}
+/**
+ * On the way to removing motorsBeep permanently, only use should now be in test task
+ */
+
+void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
+{
+    if (!enable) {
+	    frequency = 0;
+	    ratio = 0;
+    }
+    motorsSetRatio(id, 0xff);
+    motorsSetFrequency(frequency);
 }
 
 // Ithrust is thrust mapped for 65536 <==> 60 grams
@@ -233,7 +244,7 @@ void motorsSetRatio(uint32_t id, uint16_t ithrust)
     }
     else
     {
-      motorMap[id]->setCompare(motorMap[id]->tim, motorsConv16ToBits(ratio, motor_periods[id]));
+      motorMap[id]->setCompare(motorMap[id]->tim, motorsConv16ToBits(ratio, motor_period));
     }
   }
 }
@@ -249,54 +260,18 @@ int motorsGetRatio(uint32_t id)
   }
   else
   {
-    ratio = motorsConvBitsTo16(motorMap[id]->getCompare(motorMap[id]->tim), motor_periods[id]);
+    ratio = motorsConvBitsTo16(motorMap[id]->getCompare(motorMap[id]->tim), motor_period);
   }
 
   return ratio;
 }
 
-void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
-{
-  uint16_t newPeriod;
-  uint16_t newRatio;
-
-  ASSERT(id < NBR_OF_MOTORS);
-
-  if (enable)
-  {
-    newPeriod = (uint16_t)(MOTORS_TIM_CLK_FREQ / frequency);
-  newRatio = motorsConv16ToBits(ratio, newPeriod);
-  }
-  else
-  {
-    newPeriod = motorMap[id]->timPeriod;
-    newRatio = 0;
-  }
-  motor_periods[id] = newPeriod;
-
-  // Timer configuration
-  motorMap[id]->setCompare(motorMap[id]->tim, 0);
-  TIM_SetAutoreload(motorMap[id]->tim, newPeriod);
-  motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
-}
-
-void motorsSetFrequency(uint32_t id, uint16_t frequency)
+void motorsSetFrequency(uint16_t frequency)
 {
   uint16_t period;
   uint16_t newRatio;
   bool turnOn = frequency > 0;
  
-  // we have a special problem, for now
-  // motors 2 and 3 are on the same timer, so their frequency must change
-  // together
-  //
-  bool doubleChange = false;
-
-  if (id == 2 || id == 1) {
-	  id = 1; // make sure motors 2 and 3 are the same
-	  doubleChange = true;
-  }
-
 
     if (turnOn)
     {
@@ -307,37 +282,20 @@ void motorsSetFrequency(uint32_t id, uint16_t frequency)
       period = MOTORS_PWM_PERIOD;
     }
 
-
-    if (motor_periods[id] != period) {
-	    // don't make changes unless we must
-	    motor_periods[id] = period;
-
-	    newRatio = motorsConv16ToBits(motor_ratios[id], period);
-	    motorMap[id]->setCompare(motorMap[id]->tim, 0);
-	    TIM_SetAutoreload(motorMap[id]->tim, period);
-	    // TODO: will DMA avoid all timing issues?
-	    motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
+    motor_period = period;
+    for (int id=0; id < NBR_OF_MOTORS; id++) {
+	newRatio = motorsConv16ToBits(motor_ratios[id], period);
+        TIM_SetAutoreload(motorMap[id]->tim, 0); // PAUSE DA COUNTER
+	motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
     }
-
-    if (doubleChange && (motor_periods[2] != period)) {
-      motor_periods[2] = period;
-
-      newRatio = motorsConv16ToBits(motor_ratios[2], period);
-      motorMap[2]->setCompare(motorMap[2]->tim, 0);
-      TIM_SetAutoreload(motorMap[2]->tim, period);
-      // TODO: will DMA avoid all timing issues?
-      motorMap[2]->setCompare(motorMap[2]->tim, newRatio);
+    for (int id=0; id < NBR_OF_MOTORS; id++) {
+        //NOTE: we could just do this twice, since only two actual timers are involved....
+        TIM_SetAutoreload(motorMap[id]->tim, period); // RESUME DA COUNTER
     }
 }
 
+uint16_t motorsGetFrequency()
+{
+   return (uint16_t)((float)MOTORS_TIM_CLK_FREQ/motor_period);
+}
 
-LOG_GROUP_START(pwm)
-LOG_ADD(LOG_UINT32, m1_pwm, &motor_ratios[0])
-LOG_ADD(LOG_UINT32, m2_pwm, &motor_ratios[1])
-LOG_ADD(LOG_UINT32, m3_pwm, &motor_ratios[2])
-LOG_ADD(LOG_UINT32, m4_pwm, &motor_ratios[3])
-LOG_ADD(LOG_UINT32, m1_per, &motor_periods[0])
-LOG_ADD(LOG_UINT32, m2_per, &motor_periods[1])
-LOG_ADD(LOG_UINT32, m3_per, &motor_periods[2])
-LOG_ADD(LOG_UINT32, m4_per, &motor_periods[3])
-LOG_GROUP_STOP(pwm)

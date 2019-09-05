@@ -13,6 +13,7 @@ cflie.*
 version.c
 tags
 cscope.out
+.lvimrc
 
 /cf2.*
 /tag.*

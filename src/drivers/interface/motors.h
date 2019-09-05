@@ -239,17 +239,11 @@ int motorsGetRatio(uint32_t id);
  */
 void motorsTestTask(void* params);
 
-void motorsSetFrequency(uint32_t id, uint16_t frequency);
-/* Set PWM frequency for motor controller
- * This function will set all motors into a "beep"-mode,
- * each of the motor will turned on with a given ratio and frequency.
- * The higher the ratio the higher the given power to the motors.
- * ATTENTION: To much ratio can push your crazyflie into the air and hurt you!
- * Example:
- *     motorsBeep(true, 1000, (uint16_t)(72000000L / frequency)/ 20);
- *     motorsBeep(false, 0, 0); *
- * */
 void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio);
-
+/**
+ * Set the PWM frequency, used for sound on brushed motors
+ */
+void motorsSetFrequency(uint16_t frequency);
+uint16_t motorsGetFrequency();
 #endif /* __MOTORS_H__ */
 

@@ -42,23 +42,26 @@
 #include "motor_sound.h"
 #include "motors.h"
 
+#define SND_TASK_INTERVAL 50 // milliseconds
 static bool isInit=false;
-static uint16_t last_freq[NBR_OF_MOTORS] = {0};
-static uint16_t motor_freq[NBR_OF_MOTORS] = {0};
-static uint16_t last_chirpdF = 0;
+static uint16_t last_freq = 0;
+static uint16_t motor_freq = 0;
+static float chirpdF = 0;
+static uint16_t startF = 0;
+static uint16_t endF = 0;
+static bool inChirp = false;
 
-//static float chirpHolder = 0;
+/**
+ * Main chirp parameters
+ */
+static uint16_t chirpSlope = 5000; // Hz/s
+static uint16_t chirpLen = 1000; // in milliseconds
+static uint16_t chirpCenter = 15000; // Hz
+//*********
+static bool requestChirp = false;
 
-static uint16_t chirpdF = 5000;
-static bool go_chirp = false;
-static uint8_t chirpCounter = 0;
 
-# define MTR_TASK_INTERVAL 50
-// How many 'ticks' we have in a chirp
-// Task runs every MTR_TASK_INTERVAL ms
-#define CHIRP_LENGTH (20)
 
-static bool doing_chirp = false;
 
 static xTimerHandle timer;
 
@@ -68,27 +71,30 @@ static void motorSoundTimer(xTimerHandle timer)
   if (waitCounter < 100)  {
       waitCounter++;
   } else {
-    if (!doing_chirp && go_chirp) {
-      doing_chirp = true;
-      chirpCounter = 0;
-      last_chirpdF = chirpdF;
-      go_chirp = false;
-    } 
-    if (doing_chirp) {
-      if (chirpCounter > CHIRP_LENGTH) {
-        doing_chirp = false;
-        motor_freq[1] = 0;
-      } else {
-        //chirpHolder = 8000.0f + ((float)last_chirpdF*chirpCounter)/CHIRP_LENGTH;
-	motor_freq[1] = 10000+ 100*chirpCounter;//((uint16_t) chirpHolder);
-        chirpCounter += 1;
+    if (!inChirp && requestChirp) {
+      inChirp = true;
+      requestChirp = false;
+      // collect the parameters and let's goooo
+      float totalFChange = ((float)chirpLen*chirpSlope/1000.0f); // the total chirp bandwidth
+      uint16_t chirpTicks = ((chirpLen+SND_TASK_INTERVAL-1)/SND_TASK_INTERVAL); // err on the side of more ticks per chirp
+      chirpdF = totalFChange/chirpTicks; // how much the frequency changes each task tick
+      startF = chirpCenter - (totalFChange/2);
+      endF = chirpCenter + (totalFChange/2);
+      motor_freq = startF;
+    } else 
+      if (inChirp) {
+        if (motor_freq >= endF) {
+          motor_freq = 0;
+          inChirp = false;
+        } else { 
+          motor_freq = (uint16_t)(motor_freq + chirpdF);
+        }
       }
-    }
-    for (int i=0; i<NBR_OF_MOTORS; i++){
-      if (motor_freq[i] != last_freq[i]) {
-        motorsSetFrequency(i, motor_freq[i]); 
-        last_freq[i]= motor_freq[i];
-      }
+
+
+    if (motor_freq != last_freq) {
+      motorsSetFrequency(motor_freq); 
+      last_freq = motor_freq;
     }
   }   
 }
@@ -99,7 +105,7 @@ void motorSoundInit(void)
     return;
   }
 
-  timer = xTimerCreate("MtrSndT", M2T(MTR_TASK_INTERVAL), pdTRUE, NULL, motorSoundTimer);
+  timer = xTimerCreate("ChpTask", M2T(SND_TASK_INTERVAL), pdTRUE, NULL, motorSoundTimer);
   isInit = (timer != 0);
   xTimerStart(timer, 100);
 
@@ -111,10 +117,8 @@ bool motorSoundTest(void)
 }
 
 PARAM_GROUP_START(mtrsnd)
-PARAM_ADD(PARAM_UINT16, f1, motor_freq)
-PARAM_ADD(PARAM_UINT16, f2, motor_freq+1)
-PARAM_ADD(PARAM_UINT16, f3, motor_freq+2)
-PARAM_ADD(PARAM_UINT16, f4, motor_freq+3)
-PARAM_ADD(PARAM_UINT16, chLen, &chirpdF)
-PARAM_ADD(PARAM_UINT8, goChirp, &go_chirp)
+PARAM_ADD(PARAM_UINT16, centerF, &chirpCenter)
+PARAM_ADD(PARAM_UINT16, chpLen, &chirpLen)
+PARAM_ADD(PARAM_UINT16, chpSlope, &chirpSlope)
+PARAM_ADD(PARAM_UINT8, doChirp, &requestChirp)
 PARAM_GROUP_STOP(mtrsnd)
