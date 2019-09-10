@@ -40,6 +40,8 @@
 //Logging includes
 #include "log.h"
 
+#define SPECIAL_MOTOR 3 // M3 has a separate timer (TIM4)
+
 static uint16_t motorsBLConvBitsTo16(uint16_t bits);
 static uint16_t motorsBLConv16ToBits(uint16_t bits);
 static uint16_t motorsConvBitsTo16(uint16_t bits, uint16_t period);
@@ -202,19 +204,6 @@ bool motorsTest(void)
 
   return isInit;
 }
-/**
- * On the way to removing motorsBeep permanently, only use should now be in test task
- */
-
-void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
-{
-    if (!enable) {
-	    frequency = 0;
-	    ratio = 0;
-    }
-    motorsSetRatio(id, 0xff);
-    motorsSetFrequency(frequency);
-}
 
 // Ithrust is thrust mapped for 65536 <==> 60 grams
 void motorsSetRatio(uint32_t id, uint16_t ithrust)
@@ -262,12 +251,14 @@ int motorsGetRatio(uint32_t id)
   }
   else
   {
-    ratio = motorsConvBitsTo16(motorMap[id]->getCompare(motorMap[id]->tim), motor_period);
+    ratio = motorsConvBitsTo16(motorMap[id]->getCompare(motorMap[id]->tim), motor_periods[id]);
   }
 
   return ratio;
 }
 
+#ifdef SINGLE_MOTOR_CHIRP
+#pragma message("Single motor chirp")
 void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
 {
   uint16_t newPeriod;
@@ -294,6 +285,49 @@ void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
   motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
   TIM_SetAutoreload(motorMap[id]->tim, newPeriod);
   TIM_CtrlPWMOutputs(motorMap[id]->tim, ENABLE);
+}
+
+void motorsSetFrequency( uint16_t frequency)
+{
+  // only set M3, on TIM4
+  uint16_t period;
+  uint16_t newRatio;
+  bool turnOn = frequency > 0; // maybe we should enforce a minimum?
+  const int id = SPECIAL_MOTOR;
+ 
+  if (turnOn)
+  {
+    period = (uint16_t)(MOTORS_TIM_CLK_FREQ / frequency);
+  }
+  else
+  {
+    period = MOTORS_PWM_PERIOD;
+  }
+
+  if (motor_periods[id] != period) {
+    // don't make changes unless we must
+    motor_periods[id] = period;
+
+    newRatio = motorsConv16ToBits(motor_ratios[id], period);
+    motor_conv_ratios[id] = newRatio;
+    TIM_CtrlPWMOutputs(motorMap[id]->tim, DISABLE);
+    motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
+    TIM_SetAutoreload(motorMap[id]->tim, period);
+    TIM_CtrlPWMOutputs(motorMap[id]->tim, ENABLE);
+  } 
+
+}
+#else
+
+#pragma message("All motor chirp")
+void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
+{
+    if (!enable) {
+	    frequency = 0;
+	    ratio = 0;
+    }
+    motorsSetRatio(id, 0xff);
+    motorsSetFrequency(frequency);
 }
 
 void motorsSetFrequency( uint16_t frequency)
@@ -327,6 +361,7 @@ void motorsSetFrequency( uint16_t frequency)
     }
 
 }
+#endif
 
 LOG_GROUP_START(pwm)
 LOG_ADD(LOG_UINT16, rat1, motor_conv_ratios)
