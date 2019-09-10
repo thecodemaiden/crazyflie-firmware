@@ -45,7 +45,8 @@ static uint16_t motorsBLConv16ToBits(uint16_t bits);
 static uint16_t motorsConvBitsTo16(uint16_t bits, uint16_t period);
 static uint16_t motorsConv16ToBits(uint16_t bits, uint16_t period);
 
-uint32_t motor_ratios[] = {0, 0, 0, 0};
+uint16_t motor_ratios[] = {0, 0, 0, 0};
+uint16_t motor_conv_ratios[] = {0,0,0,0};
 uint32_t motor_periods[]= {MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD};
 
 void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio);
@@ -224,13 +225,15 @@ void motorsSetRatio(uint32_t id, uint16_t ithrust)
     }
   #endif
     motor_ratios[id] = ratio;
+    uint16_t newRatio = motorsConv16ToBits(ratio, motor_periods[id]);
+    motor_conv_ratios[id] = newRatio;
     if (motorMap[id]->drvType == BRUSHLESS)
     {
       motorMap[id]->setCompare(motorMap[id]->tim, motorsBLConv16ToBits(ratio));
     }
     else
     {
-      motorMap[id]->setCompare(motorMap[id]->tim, motorsConv16ToBits(ratio, motor_periods[id]));
+      motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
     }
   }
 }
@@ -262,20 +265,22 @@ void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
   if (enable)
   {
     newPeriod = (uint16_t)(MOTORS_TIM_CLK_FREQ / frequency);
-  newRatio = motorsConv16ToBits(ratio, newPeriod);
-  motor_periods[id] = newPeriod;
-  TIM_SetAutoreload(motorMap[id]->tim, 0);
+    newRatio = motorsConv16ToBits(ratio, newPeriod);
   }
   else
   {
-    //newPeriod = motorMap[id]->timPeriod;
+    newPeriod = motorMap[id]->timPeriod;
     newRatio = 0;
   }
 
+  motor_ratios[id] = ratio;
+  motor_conv_ratios[id] = newRatio;
+  motor_periods[id] = newPeriod;
   // Timer configuration
+  TIM_CtrlPWMOutputs(motorMap[id]->tim, DISABLE);
   motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
-
-  if (enable) TIM_SetAutoreload(motorMap[id]->tim, newPeriod);
+  TIM_SetAutoreload(motorMap[id]->tim, newPeriod);
+  TIM_CtrlPWMOutputs(motorMap[id]->tim, ENABLE);
 }
 
 void motorsSetFrequency( uint16_t frequency)
@@ -285,9 +290,6 @@ void motorsSetFrequency( uint16_t frequency)
   uint16_t newRatio;
   bool turnOn = frequency > 0;
  
-  
-
-
     if (turnOn)
     {
       period = (uint16_t)(MOTORS_TIM_CLK_FREQ / frequency);
@@ -303,20 +305,21 @@ void motorsSetFrequency( uint16_t frequency)
         motor_periods[id] = period;
 
 	    newRatio = motorsConv16ToBits(motor_ratios[id], period);
-	    TIM_SetAutoreload(motorMap[id]->tim, 0);
-	    // TODO: will DMA avoid all timing issues?
+	    motor_conv_ratios[id] = newRatio;
+	    TIM_CtrlPWMOutputs(motorMap[id]->tim, DISABLE);
 	    motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
 	    TIM_SetAutoreload(motorMap[id]->tim, period);
+	    TIM_CtrlPWMOutputs(motorMap[id]->tim, ENABLE);
       }
     }
 
 }
 
 LOG_GROUP_START(pwm)
-LOG_ADD(LOG_UINT16, rat1, motor_ratios)
-LOG_ADD(LOG_UINT16, rat2, motor_ratios+1)
-LOG_ADD(LOG_UINT16, rat3, motor_ratios+2)
-LOG_ADD(LOG_UINT16, rat4, motor_ratios+3)
+LOG_ADD(LOG_UINT16, rat1, motor_conv_ratios)
+LOG_ADD(LOG_UINT16, rat2, motor_conv_ratios+1)
+LOG_ADD(LOG_UINT16, rat3, motor_conv_ratios+2)
+LOG_ADD(LOG_UINT16, rat4, motor_conv_ratios+3)
 LOG_ADD(LOG_UINT16, per1, motor_periods)
 LOG_ADD(LOG_UINT16, per2, motor_periods+1)
 LOG_ADD(LOG_UINT16, per3, motor_periods+2)

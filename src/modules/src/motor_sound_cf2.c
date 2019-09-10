@@ -1,30 +1,6 @@
 /**
- *    ||          ____  _ __
- * +------+      / __ )(_) /_______________ _____  ___
- * | 0xBC |     / __  / / __/ ___/ ___/ __ `/_  / / _ \
- * +------+    / /_/ / / /_/ /__/ /  / /_/ / / /_/  __/
- *  ||  ||    /_____/_/\__/\___/_/   \__,_/ /___/\___/
- *
- * Crazyflie control firmware
- *
- * Copyright (C) 2015 Bitcraze AB
- * This file created by Adeola Bannis, Carnegie Mellon University
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, in version 3.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
- *
- * sound_motors_cf2.c - Module used to play melodies and system sounds though a buzzer
- */
-
+ * Copied from sound_motors_cf2.c with heavy modification
+ **/
 #include <stdbool.h>
 
 /* FreeRtos includes */
@@ -41,53 +17,117 @@
 #include "log.h"
 #include "motor_sound.h"
 #include "motors.h"
+// TODO: convert all variables to camelCase
+
+#define MSG_LENGTH 8
+// how many task ticks to wait between chirp symbols
+#define PAUSE_LENGTH 8 
+static struct {
+  uint16_t topF;
+  uint16_t bottomF;
+  uint16_t dF;
+  uint8_t message;
+  uint8_t msgCounter;
+} _msgParams;
 
 static bool isInit=false;
-static uint16_t last_freq = 0;
-static uint16_t motor_freq = 0;
-static uint16_t last_chirpdF = 0;
+static uint16_t centerFreq = 16000; // in Hz
+static uint16_t chirpLen = 1200; // in milliseconds
+static int16_t chirpRate = 2000; // in Hz/s <=> Hz^2
+static uint8_t message = 0x00;
 
-//static float chirpHolder = 0;
+static bool requestChirp = false;
+static uint16_t startFreq = 0;
+static uint16_t endFreq = 0;
+static int16_t fStep = 0;
+static uint16_t lastFreq = 0;
+static uint16_t motorFreq = 0;
 
-static uint16_t chirpdF = 5000;
-static bool go_chirp = false;
-static uint8_t chirpCounter = 0;
+static bool inPause = false;
+static uint8_t pauseTicks = 0;
 
 # define MTR_TASK_INTERVAL 50
-// How many 'ticks' we have in a chirp
-// Task runs every MTR_TASK_INTERVAL ms
-#define CHIRP_LENGTH (20)
 
-static bool doing_chirp = false;
+static bool doingMsg = false;
 
 static xTimerHandle timer;
+
+static void setupNextChirp()
+{
+  // we don't check msgCounter here........
+  pauseTicks = 0;
+  bool isDownChirp = !(_msgParams.message & (1 << _msgParams.msgCounter));
+  if (isDownChirp){
+    startFreq = _msgParams.topF;
+    endFreq = _msgParams.bottomF;
+    fStep = -_msgParams.dF;
+  } else {
+    // upchirp
+    startFreq = _msgParams.bottomF;
+    endFreq = _msgParams.topF;
+    fStep = _msgParams.dF;
+  }
+  motorFreq = startFreq;
+  _msgParams.msgCounter += 1;
+}
+
+static void setupMessage()
+{
+  int16_t totalFChange = (int16_t)(chirpRate * chirpLen / 1000.0);
+  _msgParams.dF = (int16_t)(chirpRate * MTR_TASK_INTERVAL / 1000.0);
+  _msgParams.bottomF = centerFreq - totalFChange/2;
+  _msgParams.topF = centerFreq + totalFChange/2;
+  _msgParams.message = message;
+  _msgParams.msgCounter = 0;
+  inPause = false;
+}
 
 static void motorSoundTimer(xTimerHandle timer)
 {
   static uint16_t waitCounter = 0;
   if (waitCounter < 100)  {
       waitCounter++;
-  } else {
-    if (!doing_chirp && go_chirp) {
-      doing_chirp = true;
-      chirpCounter = 0;
-      last_chirpdF = chirpdF;
-      go_chirp = false;
-    } 
-    if (doing_chirp) {
-      if (chirpCounter > CHIRP_LENGTH) {
-        doing_chirp = false;
-        motor_freq = 0;
+      return;
+  }
+  if (!doingMsg && requestChirp) {
+    doingMsg = true;
+    requestChirp = false;
+
+    setupMessage();
+    setupNextChirp();
+  } 
+
+  if (motorFreq != lastFreq) {
+      motorsSetFrequency(motorFreq); 
+      lastFreq = motorFreq;
+  }
+
+  if (doingMsg) {
+    if (inPause) {
+      pauseTicks += 1;
+      if (pauseTicks > PAUSE_LENGTH) {
+        inPause = false;
+	setupNextChirp();
       } else {
-	motor_freq = 10000+ 100*chirpCounter;//((uint16_t) chirpHolder);
-        chirpCounter += 1;
+        return; // don't do anything if we were pausing
       }
     }
-      if (motor_freq != last_freq) {
-        motorsSetFrequency(motor_freq); 
-        last_freq = motor_freq;
+    // we were not pausing, see if we're done with this symbol
+    bool finished = (fStep < 0 && motorFreq < endFreq) || (fStep > 0 && motorFreq > endFreq);
+    if (finished) { // symbol done
+      motorFreq = 0;
+      if (_msgParams.msgCounter > MSG_LENGTH) {
+        // we have finished all the symbols in the message
+        doingMsg = false;
+      } else {
+        // we just have to wait a few ticks to the next symbol
+        inPause = true;
+      }
+    } else {
+      // we weren't done with the symbol
+      motorFreq += fStep;
     }
-  }   
+  }
 }
 
 void motorSoundInit(void)
@@ -108,7 +148,9 @@ bool motorSoundTest(void)
 }
 
 PARAM_GROUP_START(chirp)
-PARAM_ADD(PARAM_UINT16, f1, &motor_freq)
-PARAM_ADD(PARAM_UINT16, chLen, &chirpdF)
-PARAM_ADD(PARAM_UINT8, goChirp, &go_chirp)
+PARAM_ADD(PARAM_UINT16, length, &chirpLen)
+PARAM_ADD(PARAM_UINT16, center, &centerFreq)
+PARAM_ADD(PARAM_INT16, slope, &chirpRate)
+PARAM_ADD(PARAM_UINT8, message, &message)
+PARAM_ADD(PARAM_UINT8, goChirp, &requestChirp)
 PARAM_GROUP_STOP(chirp)

@@ -59,7 +59,7 @@
 
 // Compensate thrust depending on battery voltage so it will produce about the same
 // amount of thrust independent of the battery voltage. Based on thrust measurement.
-#define ENABLE_THRUST_BAT_COMPENSATED
+//#define ENABLE_THRUST_BAT_COMPENSATED
 
 //#define ENABLE_ONESHOT125
 
