@@ -59,7 +59,7 @@
 
 // Compensate thrust depending on battery voltage so it will produce about the same
 // amount of thrust independent of the battery voltage. Based on thrust measurement.
-#define ENABLE_THRUST_BAT_COMPENSATED
+//#define ENABLE_THRUST_BAT_COMPENSATED
 
 //#define ENABLE_ONESHOT125
 
@@ -239,6 +239,15 @@ int motorsGetRatio(uint32_t id);
  */
 void motorsTestTask(void* params);
 
+/* Set PWM frequency for motor controller
+ * This function will set all motors into a "beep"-mode,
+ * each of the motor will turned on with a given ratio and frequency.
+ * The higher the ratio the higher the given power to the motors.
+ * ATTENTION: To much ratio can push your crazyflie into the air and hurt you!
+ * Example:
+ *     motorsBeep(true, 1000, (uint16_t)(72000000L / frequency)/ 20);
+ *     motorsBeep(false, 0, 0); *
+ * */
 void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio);
 /**
  * Set the PWM frequency, used for sound on brushed motors
