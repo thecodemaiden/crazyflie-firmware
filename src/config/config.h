@@ -49,7 +49,7 @@
 #define PROTOCOL_VERSION 4
 
 #ifdef STM32F4XX
-  #define QUAD_FORMATION_X
+  #define QUAD_FORMATION_EXPERIMENT
 
   #define CONFIG_BLOCK_ADDRESS    (2048 * (64-1))
   #define MCU_ID_ADDRESS          0x1FFF7A10
@@ -174,7 +174,7 @@
  * \def ACTIVATE_STARTUP_SOUND
  * Playes a startup melody using the motors and PWM modulation
  */
-//#define ACTIVATE_STARTUP_SOUND
+#define ACTIVATE_STARTUP_SOUND
 
 // Define to force initialization of expansion board drivers. For test-rig and programming.
 //#define FORCE_EXP_DETECT

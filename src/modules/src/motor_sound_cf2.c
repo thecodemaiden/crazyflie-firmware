@@ -21,7 +21,7 @@
 
 #define MSG_LENGTH 8
 // how many task ticks to wait between chirp symbols
-#define PAUSE_LENGTH 8 
+#define PAUSE_LENGTH 2 
 static struct {
   uint16_t topF;
   uint16_t bottomF;
@@ -118,7 +118,7 @@ static void motorSoundTimer(xTimerHandle timer)
     bool finished = (fStep < 0 && motorFreq < endFreq) || (fStep > 0 && motorFreq > endFreq);
     if (finished) { // symbol done
       motorFreq = 0;
-      if (_msgParams.msgCounter > MSG_LENGTH) {
+      if (_msgParams.msgCounter >= MSG_LENGTH) {
         // we have finished all the symbols in the message
         doingMsg = false;
       } else {
