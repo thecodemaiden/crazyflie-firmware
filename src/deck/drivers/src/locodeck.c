@@ -467,10 +467,10 @@ static void dwm1000Init(DeckInfo *info)
   NVIC_Init(&NVIC_InitStructure);
 
   vSemaphoreCreateBinary(irqSemaphore);
-  vSemaphoreCreateBinary(algoSemaphore);
+  algoSemaphore= xSemaphoreCreateMutex();
 
-  xTaskCreate(uwbTask, "lps", 3*configMINIMAL_STACK_SIZE, NULL,
-                    5/*priority*/, NULL);
+  xTaskCreate(uwbTask, LPS_DECK_TASK_NAME, 3*configMINIMAL_STACK_SIZE, NULL,
+                    LPS_DECK_TASK_PRI, NULL);
 
   isInit = true;
 }

@@ -177,10 +177,13 @@ typedef struct
   motorsDrvType drvType;
   uint32_t      gpioPerif;
   GPIO_TypeDef* gpioPort;
-  uint32_t      gpioPin;
-  uint32_t      gpioPinSource;
+  uint16_t      gpioPin;
+  uint16_t      gpioPinSource;
   uint32_t      gpioOType;
-  uint32_t      gpioAF;
+  uint8_t       gpioAF;
+  uint32_t      gpioPowerswitchPerif;
+  GPIO_TypeDef* gpioPowerswitchPort;
+  uint16_t      gpioPowerswitchPin;
   uint32_t      timPerif;
   TIM_TypeDef*  tim;
   uint16_t      timPolarity;
@@ -197,10 +200,11 @@ typedef struct
 /**
  * Motor mapping configurations
  */
+extern const MotorPerifDef* motorMapNoMotors[NBR_OF_MOTORS];
 extern const MotorPerifDef* motorMapDefaultBrushed[NBR_OF_MOTORS];
 extern const MotorPerifDef* motorMapDefaltConBrushless[NBR_OF_MOTORS];
 extern const MotorPerifDef* motorMapBigQuadDeck[NBR_OF_MOTORS];
-extern const MotorPerifDef* motorMapRZRBrushless[NBR_OF_MOTORS];
+extern const MotorPerifDef* motorMapBoltBrushless[NBR_OF_MOTORS];
 
 /**
  * Test sound tones

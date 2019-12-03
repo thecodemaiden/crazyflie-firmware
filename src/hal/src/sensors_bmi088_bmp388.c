@@ -33,9 +33,6 @@
 
 #include "imu.h"
 
-#include "zranger.h"
-#include "zranger2.h"
-
 #include "FreeRTOS.h"
 #include "semphr.h"
 #include "task.h"
@@ -112,7 +109,7 @@ static xSemaphoreHandle dataReady;
 
 static bool isInit = false;
 static sensorData_t sensorData;
-static uint64_t imuIntTimestamp;
+static volatile uint64_t imuIntTimestamp;
 
 static Axis3i16 gyroRaw;
 static Axis3i16 accelRaw;
@@ -256,9 +253,6 @@ void sensorsBmi088Bmp388Acquire(sensorData_t *sensors, const uint32_t tick)
   sensorsReadAcc(&sensors->acc);
   sensorsReadMag(&sensors->mag);
   sensorsReadBaro(&sensors->baro);
-  if (!zRangerReadRange(&sensors->zrange, tick)) {
-    zRanger2ReadRange(&sensors->zrange, tick);
-  }
   sensors->interruptTimestamp = sensorData.interruptTimestamp;
 }
 
