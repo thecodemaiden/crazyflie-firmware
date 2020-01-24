@@ -9,6 +9,8 @@
 #include "nvicconf.h"
 #include "log.h"
 
+#define ADC_SAMPLE_PERIOD ((84000000L/8000)-1)
+
 
 static bool isInit = false;
 static bool isDmaInit = false;
@@ -68,9 +70,10 @@ static void micDmaInit(void)
   /* Init ADC3: 12bit, single-conversion. For Arduino compatibility set 10bit */
   ADC_InitStructure.ADC_Resolution = ADC_Resolution_12b;
   ADC_InitStructure.ADC_ScanConvMode = DISABLE;
-  ADC_InitStructure.ADC_ContinuousConvMode = ENABLE;
-  ADC_InitStructure.ADC_ExternalTrigConvEdge = 0;
-  ADC_InitStructure.ADC_ExternalTrigConv = 0;
+  ADC_InitStructure.ADC_ContinuousConvMode = DISABLE;
+  ADC_InitStructure.ADC_ExternalTrigConvEdge = ADC_ExternalTrigConvEdge_Rising;
+  // trigger using TIM3_TRG0
+  ADC_InitStructure.ADC_ExternalTrigConv = ADC_ExternalTrigConv_T3_TRGO;
   ADC_InitStructure.ADC_DataAlign = ADC_DataAlign_Right;
   ADC_InitStructure.ADC_NbrOfConversion = 1;
   ADC_Init(ADC3, &ADC_InitStructure);
@@ -119,6 +122,32 @@ static void micDmaInit(void)
   ADC_DMARequestAfterLastTransferCmd(ADC3, ENABLE);
   DMA_Cmd(DMA2_Stream1, ENABLE);
   ADC_DMACmd(ADC3, ENABLE);
+
+  /* Prepare timer 3 to generate our samples - start with 8kHz */
+  TIM_TimeBaseInitTypeDef TIM_BaseStructure;
+  //TIM_OCInitTypeDef TIM_OCStructure;
+
+  RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE);
+  TIM_BaseStructure.TIM_Period = ADC_SAMPLE_PERIOD;
+  TIM_BaseStructure.TIM_Prescaler = 0;
+  TIM_BaseStructure.TIM_ClockDivision = 0;
+  TIM_BaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
+  TIM_BaseStructure.TIM_RepetitionCounter = 0;
+  TIM_TimeBaseInit(TIM3, &TIM_BaseStructure);
+  //TIM_ARRPreloadConfig(TIM3, ENABLE);
+  TIM_SelectOutputTrigger(TIM3, TIM_TRGOSource_Update);
+
+  //TIM_OCStructure.TIM_OCMode = TIM_OCMode_Timing;
+  //TIM_OCStructure.TIM_OutputState = TIM_OutputState_Enable;
+  //TIM_OCStructure.TIM_Pulse = 0;
+  //TIM_OCStructure.TIM_OCPolarity = TIM_OCPolarity_High;
+  //TIM_OCStructure.TIM_OCIdleState = TIM_OCIdleState_Reset;
+  //TIM_OC1Init(TIM3, &TIM_OCStructure);
+
+  //TIM_ITConfig(TIM3, TIM_IT_CC1, ENABLE);
+  TIM_Cmd(TIM3, ENABLE);
+  
+
   isDmaInit = true;
 }
 
@@ -131,7 +160,7 @@ void micInit(DeckInfo *info)
   isInit = true;
   timer = xTimerCreate("micTimer", M2T(50),pdTRUE,NULL,micReadTimer);
  // xTimerStart(timer,100);
-ADC_SoftwareStartConv(ADC3);
+//ADC_SoftwareStartConv(ADC3);
 }
 
 bool micTest()
@@ -165,6 +194,7 @@ const DeckDriver micDriver = {
   .pid = 0,
   .name = "analogMic",
   .usedGpio = DECK_USING_PA3,
+  .usedPeriph = DECK_USING_TIMER3,
   .init = micInit,
   .test = micTest,
 };
