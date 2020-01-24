@@ -7,6 +7,6 @@
 #ifndef __MICDECK_H__
 #define __MICDECK_H__
 
-#define BUFFER_SIZE 32
+#define BUFFER_SIZE 128
 
 #endif
