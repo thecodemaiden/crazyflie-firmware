@@ -135,6 +135,7 @@ PROJ_OBJ += led_f405.o mpu6500.o i2cdev_f405.o ws2812_cf2.o lps25h.o i2c_drv.o
 PROJ_OBJ += ak8963.o eeprom.o maxsonar.o piezo.o
 PROJ_OBJ += uart_syslink.o swd.o uart1.o uart2.o watchdog.o
 PROJ_OBJ += cppm.o
+PROJ_OBJ += mic.o
 PROJ_OBJ += bmi055_accel.o bmi055_gyro.o bmi160.o bmp280.o bstdr_comm_support.o bmm150.o
 PROJ_OBJ += bmi088_accel.o bmi088_gyro.o bmi088_fifo.o bmp3.o
 PROJ_OBJ += pca9685.o vl53l0x.o pca95x4.o pca9555.o vl53l1x.o pmw3901.o
