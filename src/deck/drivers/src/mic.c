@@ -9,7 +9,10 @@
 #include "nvicconf.h"
 #include "log.h"
 
-#define ADC_SAMPLE_PERIOD ((84000000L/8000)-1)
+#include "arm_math.h"
+
+#define SAMPLE_RATE (8000)
+#define ADC_SAMPLE_PERIOD ((84000000L/SAMPLE_RATE)-1)
 
 
 static bool isInit = false;
@@ -17,9 +20,14 @@ static bool isTimerInit = false;
 static bool isAdcInit = false;
 static bool isDmaInit = false;
 static bool isGpioInit = false;
+static bool isFftInit = false;
 
 static uint16_t dmaBufferBottom[BUFFER_SIZE];
 static uint16_t dmaBufferTop[BUFFER_SIZE];
+//TODO: when we premultiply with chirp it will be twice as long
+// and we will need another buffer of the same size for the chirp coeffs
+static float32_t fftWindow[BUFFER_SIZE];
+static float32_t fftOut[BUFFER_SIZE];
 
 static int8_t readyBuffer = -1; // changes to 0 or 1 as buffers are filled by DMA
 static float windowEnergy = 0;
@@ -28,11 +36,14 @@ static uint16_t nInterrupts = 0;
 static uint16_t nReads = 0;
 static uint16_t adcInterrupts = 0;
 static float filteredOut = 0;
+static float maxFreq = 0;
+static float32_t maxFreqVal = 0;
 
 static xTimerHandle timer;
 static void micReadTimer(xTimerHandle timer);
 
 static NVIC_InitTypeDef NVIC_InitStructure;
+static arm_rfft_fast_instance_f32 fftParams;
 
 static void micGpioInit(void)
 {
@@ -163,6 +174,10 @@ static void micSamplerInit(void)
   isTimerInit = true;
 }
 
+static void micFftInit(void)
+{
+  isFftInit = (arm_rfft_fast_init_f32(&fftParams, BUFFER_SIZE) == ARM_MATH_SUCCESS);
+}
 
 void micInit(DeckInfo *info)
 {
@@ -171,6 +186,7 @@ void micInit(DeckInfo *info)
   if (!isAdcInit) micAdcInit();
   if (!isDmaInit) micDmaInit();
   if (!isTimerInit) micSamplerInit();
+  if (!isFftInit) micFftInit();
 
   isInit = true;
   timer = xTimerCreate("micTimer", M2T(10),pdTRUE,NULL,micReadTimer);
@@ -179,7 +195,7 @@ void micInit(DeckInfo *info)
 
 bool micTest()
 {
-  bool reallyDidInit = isDmaInit;
+  bool reallyDidInit = isInit;
   reallyDidInit &= (DMA_GetCmdStatus(DMA2_Stream1)==ENABLE); 
   return isDmaInit && reallyDidInit; 
 }
@@ -203,9 +219,19 @@ static void processMicBuffer()
     lastValue = dmaBuffer[ii];
     windowEnergy = windowEnergy + (float)lastValue-ADC_OFFSET;
     filteredOut = 0.8f*filteredOut + 0.2f*(lastValue - ADC_OFFSET);
+    fftWindow[ii] = (float32_t)lastValue - ADC_OFFSET;
   }
   nReads = nReads+1;
   readyBuffer = -1;
+  // do the FFT here
+  uint32_t maxBin = 0;
+  arm_rfft_fast_f32(&fftParams, fftWindow, fftOut, 0);
+  // change the complex values back to real values
+  arm_cmplx_mag_f32(fftOut, fftWindow, BUFFER_SIZE/2);
+  // get the max frequency, ignore bin 0
+  arm_max_f32(fftWindow+1, BUFFER_SIZE/2-1, &maxFreqVal, &maxBin);
+  // calculate the max frequency from the bin
+  maxFreq = (float)(maxBin+1)*((float)SAMPLE_RATE/BUFFER_SIZE);
 }
 
 static void micReadTimer(xTimerHandle timer)
@@ -231,8 +257,9 @@ LOG_GROUP_START(mic)
   LOG_ADD(LOG_FLOAT, filter, &filteredOut)
   LOG_ADD(LOG_UINT16, rawRead, &lastValue)
   LOG_ADD(LOG_UINT16, triggers, &nInterrupts)
-  LOG_ADD(LOG_UINT16, nRead, &nReads)
-  LOG_ADD(LOG_UINT16, adc, &adcInterrupts)
+  //LOG_ADD(LOG_UINT16, nRead, &nReads)
+ // LOG_ADD(LOG_UINT16, adc, &adcInterrupts)
+  LOG_ADD(LOG_FLOAT, maxFreq, &maxFreq) 
 LOG_GROUP_STOP(mic)
 
 /** 
