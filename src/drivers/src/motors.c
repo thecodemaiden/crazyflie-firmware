@@ -44,10 +44,11 @@
 
 static uint16_t motorsBLConvBitsTo16(uint16_t bits);
 static uint16_t motorsBLConv16ToBits(uint16_t bits);
-static uint16_t motorsConvBitsTo16(uint16_t bits);
-static uint16_t motorsConv16ToBits(uint16_t bits);
+static uint16_t motorsConvBitsTo16(uint16_t bits, uint32_t id);
+static uint16_t motorsConv16ToBits(uint16_t bits, uint32_t id);
 
 uint32_t motor_ratios[] = {0, 0, 0, 0};
+uint16_t motor_periods[] = {MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD};
 
 void motorsPlayTone(uint16_t frequency, uint16_t duration_msec);
 void motorsPlayMelody(uint16_t *notes);
@@ -75,14 +76,15 @@ static uint16_t motorsBLConv16ToBits(uint16_t bits)
   return (MOTORS_BL_PWM_CNT_FOR_HIGH + ((bits * MOTORS_BL_PWM_CNT_FOR_HIGH) / 0xFFFF));
 }
 
-static uint16_t motorsConvBitsTo16(uint16_t bits)
+static uint16_t motorsConvBitsTo16(uint16_t bits, uint32_t id)
 {
-  return ((bits) << (16 - MOTORS_PWM_BITS));
+  return bits;
 }
 
-static uint16_t motorsConv16ToBits(uint16_t bits)
+static uint16_t motorsConv16ToBits(uint16_t bits, uint32_t id)
 {
-  return ((bits) >> (16 - MOTORS_PWM_BITS) & ((1 << MOTORS_PWM_BITS) - 1));
+  float dc = (float)bits/UINT16_MAX;
+  return (uint16_t)(dc*(motor_periods[id]+1)-1);
 }
 
 /* Public functions */
@@ -245,7 +247,7 @@ void motorsSetRatio(uint32_t id, uint16_t ithrust)
     }
     else
     {
-      motorMap[id]->setCompare(motorMap[id]->tim, motorsConv16ToBits(ratio));
+      motorMap[id]->setCompare(motorMap[id]->tim, motorsConv16ToBits(ratio,id));
     }
   }
 }
@@ -261,7 +263,7 @@ int motorsGetRatio(uint32_t id)
   }
   else
   {
-    ratio = motorsConvBitsTo16(motorMap[id]->getCompare(motorMap[id]->tim));
+    ratio = motorsConvBitsTo16(motorMap[id]->getCompare(motorMap[id]->tim), id);
   }
 
   return ratio;
@@ -277,13 +279,13 @@ void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
 
   if (enable)
   {
-    TIM_TimeBaseStructure.TIM_Prescaler = (5 - 1);
     TIM_TimeBaseStructure.TIM_Period = (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency);
+    TIM_TimeBaseStructure.TIM_Prescaler = (MOTORS_BEEP_PRESCALE-1);
   }
   else
   {
     TIM_TimeBaseStructure.TIM_Period = motorMap[id]->timPeriod;
-    TIM_TimeBaseStructure.TIM_Prescaler = motorMap[id]->timPrescaler;
+    TIM_TimeBaseStructure.TIM_Prescaler = 0;
   }
 
   // Timer configuration
