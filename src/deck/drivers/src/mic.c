@@ -13,10 +13,15 @@
 
 
 static bool isInit = false;
+static bool isTimerInit = false;
+static bool isAdcInit = false;
 static bool isDmaInit = false;
+static bool isGpioInit = false;
 
-static uint16_t dmaBuffer[BUFFER_SIZE];
-//static int headPtr = BUFFER_SIZE-1;
+static uint16_t dmaBufferBottom[BUFFER_SIZE];
+static uint16_t dmaBufferTop[BUFFER_SIZE];
+
+static int8_t readyBuffer = -1; // changes to 0 or 1 as buffers are filled by DMA
 static float windowEnergy = 0;
 static uint16_t lastValue = 0;
 static uint16_t nInterrupts = 0;
@@ -27,14 +32,27 @@ static float filteredOut = 0;
 static xTimerHandle timer;
 static void micReadTimer(xTimerHandle timer);
 
-static DMA_InitTypeDef DMA_InitStructure;
-static void micDmaInit(void)
+static NVIC_InitTypeDef NVIC_InitStructure;
+
+static void micGpioInit(void)
 {
-  NVIC_InitTypeDef NVIC_InitStructure;
-  RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_DMA2, ENABLE);
+  /* Populate structure with RESET values. */
+  GPIO_InitTypeDef GPIO_InitStructure;
+  GPIO_StructInit(&GPIO_InitStructure);
+  /* Initialise PA3 to analog mode. */
+  GPIO_InitStructure.GPIO_Pin   = GPIO_Pin_3;
+  GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_AN;
+  GPIO_InitStructure.GPIO_Speed = GPIO_Speed_25MHz;
+  GPIO_InitStructure.GPIO_PuPd  = GPIO_PuPd_NOPULL;
+
+  GPIO_Init(GPIOA, &GPIO_InitStructure);
+  isGpioInit = true;
+}
+
+static void micAdcInit(void)
+{
   /* enable ADC clock */
   RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC3, ENABLE);
-
   //adcInit()
   // Direct paste from deck api so we can config more
   ADC_DeInit();
@@ -48,18 +66,6 @@ static void micDmaInit(void)
   ADC_CommonStructInit(&ADC_CommonInitStructure);
 
   RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA, ENABLE);
-  /* Populate structure with RESET values. */
-  GPIO_InitTypeDef GPIO_InitStructure;
-  GPIO_StructInit(&GPIO_InitStructure);
-  /* Initialise PA3 to analog mode. */
-  GPIO_InitStructure.GPIO_Pin   = GPIO_Pin_3;
-  GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_AN;
-  GPIO_InitStructure.GPIO_Speed = GPIO_Speed_25MHz;
-  GPIO_InitStructure.GPIO_PuPd  = GPIO_PuPd_NOPULL;
-
-  GPIO_Init(GPIOA, &GPIO_InitStructure);
-
-
   /* init ADCs in independent mode, div clock by two */
   ADC_CommonInitStructure.ADC_Mode = ADC_Mode_Independent;
   ADC_CommonInitStructure.ADC_Prescaler = ADC_Prescaler_Div2; /* HCLK = 168MHz, PCLK2 = 84MHz, ADCCLK = 42MHz (when using ADC_Prescaler_Div2) */
@@ -91,9 +97,19 @@ static void micDmaInit(void)
   ADC_RegularChannelConfig(ADC3, ADC_Channel_3, 1, ADC_SampleTime_15Cycles);
   ADC_Cmd(ADC3, ENABLE);
 
+  ADC_DMARequestAfterLastTransferCmd(ADC3, ENABLE);
+  isAdcInit = true;
+}
+
+static void micDmaInit(void)
+{
+  RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_DMA2, ENABLE);
+
+  DMA_InitTypeDef DMA_InitStructure;
   DMA_StructInit(&DMA_InitStructure);
   DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)(&(ADC3->DR));
-  DMA_InitStructure.DMA_Memory0BaseAddr = (uint32_t)dmaBuffer;
+  DMA_InitStructure.DMA_Memory0BaseAddr = (uint32_t)dmaBufferBottom;
+  //DMA_InitStructure.DMA_Memory1BaseAddr = (uint32_t)dmaBufferTop;
   DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
   DMA_InitStructure.DMA_MemoryBurst = DMA_MemoryBurst_Single;
   DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
@@ -109,6 +125,10 @@ static void micDmaInit(void)
   DMA_InitStructure.DMA_Channel = DMA_Channel_2;
   DMA_Init(DMA2_Stream1, &DMA_InitStructure);
 
+  // set up double buffering
+  DMA_DoubleBufferModeConfig(DMA2_Stream1, (uint32_t)dmaBufferTop, DMA_Memory_0);
+  DMA_DoubleBufferModeCmd(DMA2_Stream1, ENABLE);
+
   // interrupt enable - transfer complete
   DMA_ITConfig(DMA2_Stream1, DMA_IT_TC, ENABLE);
 
@@ -119,13 +139,16 @@ static void micDmaInit(void)
   NVIC_Init(&NVIC_InitStructure);
 
   // ENABLE DMA
-  ADC_DMARequestAfterLastTransferCmd(ADC3, ENABLE);
   DMA_Cmd(DMA2_Stream1, ENABLE);
   ADC_DMACmd(ADC3, ENABLE);
 
+  isDmaInit = true;
+}
+
+static void micSamplerInit(void)
+{
   /* Prepare timer 3 to generate our samples - start with 8kHz */
   TIM_TimeBaseInitTypeDef TIM_BaseStructure;
-  //TIM_OCInitTypeDef TIM_OCStructure;
 
   RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE);
   TIM_BaseStructure.TIM_Period = ADC_SAMPLE_PERIOD;
@@ -134,33 +157,24 @@ static void micDmaInit(void)
   TIM_BaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
   TIM_BaseStructure.TIM_RepetitionCounter = 0;
   TIM_TimeBaseInit(TIM3, &TIM_BaseStructure);
-  //TIM_ARRPreloadConfig(TIM3, ENABLE);
   TIM_SelectOutputTrigger(TIM3, TIM_TRGOSource_Update);
-
-  //TIM_OCStructure.TIM_OCMode = TIM_OCMode_Timing;
-  //TIM_OCStructure.TIM_OutputState = TIM_OutputState_Enable;
-  //TIM_OCStructure.TIM_Pulse = 0;
-  //TIM_OCStructure.TIM_OCPolarity = TIM_OCPolarity_High;
-  //TIM_OCStructure.TIM_OCIdleState = TIM_OCIdleState_Reset;
-  //TIM_OC1Init(TIM3, &TIM_OCStructure);
-
-  //TIM_ITConfig(TIM3, TIM_IT_CC1, ENABLE);
   TIM_Cmd(TIM3, ENABLE);
   
-
-  isDmaInit = true;
+  isTimerInit = true;
 }
 
 
 void micInit(DeckInfo *info)
 {
   if (isInit) return;
+  if (!isGpioInit) micGpioInit();
+  if (!isAdcInit) micAdcInit();
   if (!isDmaInit) micDmaInit();
+  if (!isTimerInit) micSamplerInit();
 
   isInit = true;
-  timer = xTimerCreate("micTimer", M2T(50),pdTRUE,NULL,micReadTimer);
- // xTimerStart(timer,100);
-//ADC_SoftwareStartConv(ADC3);
+  timer = xTimerCreate("micTimer", M2T(10),pdTRUE,NULL,micReadTimer);
+  xTimerStart(timer,100);
 }
 
 bool micTest()
@@ -170,22 +184,33 @@ bool micTest()
   return isDmaInit && reallyDidInit; 
 }
 
-/*** periodic analog read + process ***/
-
-void updateMicBuffer()
+// process data windows if available
+static void processMicBuffer()
 {
-//  if (!(DMA_GetCmdStatus(DMA2_Stream1) == DISABLE)){
-//    DMA_Init(DMA2_Stream1, &DMA_InitStructure);
-//    DMA_Cmd(DMA2_Stream1, ENABLE);
-//  }
-//ADC_SoftwareStartConv(ADC3);
-//while(ADC_GetFlagStatus(ADC3, ADC_FLAG_EOC) == RESET);
-//nReads = nReads + 1;
+#define ADC_OFFSET (2047.0f)
+  uint16_t *dmaBuffer = NULL;
+  if (readyBuffer < 0) return;
+
+  if (readyBuffer == 0) {
+    dmaBuffer = dmaBufferTop;
+  }else{
+    dmaBuffer = dmaBufferBottom;
+  }
+  // PROCESS THE DATA QUICKLY!!
+  windowEnergy = 0;
+  nInterrupts = nInterrupts+1;
+  for (int ii=0; ii<BUFFER_SIZE; ii++) {
+    lastValue = dmaBuffer[ii];
+    windowEnergy = windowEnergy + (float)lastValue-ADC_OFFSET;
+    filteredOut = 0.8f*filteredOut + 0.2f*(lastValue - ADC_OFFSET);
+  }
+  nReads = nReads+1;
+  readyBuffer = -1;
 }
 
 static void micReadTimer(xTimerHandle timer)
 {
-  workerSchedule(updateMicBuffer, NULL);
+  workerSchedule(processMicBuffer, NULL);
 }
 
 
@@ -224,33 +249,13 @@ void __attribute__((used)) ADC_IRQHandler(void)
     ADC_ClearITPendingBit(ADC3, ADC_IT_OVR);
   }
 }
-#define ADC_OFFSET (2047.0f)
 void __attribute__((used)) DMA2_Stream1_IRQHandler(void)
 {
- // portBASE_TYPE xHigherPriorityTaskWoken = pdFALSE;
-
-  //DMA_ITConfig(DMA2_Stream1, DMA_IT_TC, DISABLE);
+  // Check which buffer we should use to process the data
+  uint32_t busyBuffer = DMA_GetCurrentMemoryTarget(DMA2_Stream1);
   // Clear stream flags
+  readyBuffer = 1-(busyBuffer&1);
   DMA_ClearITPendingBit(DMA2_Stream1, DMA_FLAG_TCIF1);
   DMA_ClearFlag(DMA2_Stream1, DMA_IT_TCIF1);
 
-  // PROCESS THE DATA QUICKLY!!
-  windowEnergy = 0;
-  nInterrupts = nInterrupts+1;
-  for (int ii=0; ii<BUFFER_SIZE; ii++) {
-    lastValue = dmaBuffer[ii];
-    windowEnergy = windowEnergy + (float)lastValue-ADC_OFFSET;
-    filteredOut = 0.8f*filteredOut + 0.2f*(lastValue - ADC_OFFSET);
-  }
- // DMA_MemoryTargetConfig(DMA2_Stream1, dmaBuffer);
-  //DMA_SetCurrDataCounter(DMA2_Stream1, BUFFER_SIZE);
-  //DMA_Cmd(DMA2_Stream1, DISABLE);
-
-// TODO: use semaphore to access the buffer data?
-//  xSemaphoreGiveFromISR(txComplete, &xHigherPriorityTaskWoken);
-
-//  if (xHigherPriorityTaskWoken)
-//  {
- //   portYIELD();
-//  }
 }
