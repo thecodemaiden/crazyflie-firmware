@@ -84,11 +84,6 @@ void powerDistribution(const control_t *control)
     motorPower.m2 = limitThrust(control->thrust - r - p - control->yaw);
     motorPower.m3 =  limitThrust(control->thrust + r - p + control->yaw);
     motorPower.m4 =  limitThrust(control->thrust + r + p - control->yaw);
-  #elif defined(QUAD_FORMATION_EXPERIMENT)
-    motorPower.m1 = limitThrust(control->thrust);
-    motorPower.m2 = limitThrust(control->thrust);
-    motorPower.m3 = limitThrust(control->thrust);
-    motorPower.m4 = limitThrust(control->thrust);
   #else // QUAD_FORMATION_NORMAL
     motorPower.m1 = limitThrust(control->thrust + control->pitch +
                                control->yaw);

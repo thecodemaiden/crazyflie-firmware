@@ -50,6 +50,7 @@
 #include "usddeck.h"
 #include "quatcompress.h"
 #include "statsCnt.h"
+#include "static_mem.h"
 
 static bool isInit;
 static bool emergencyStop = false;
@@ -125,6 +126,7 @@ static float accVarZ[NBR_OF_MOTORS];
 static uint8_t motorPass = 0;
 static uint16_t motorTestCount = 0;
 
+STATIC_MEM_TASK_ALLOC(stabilizerTask, STABILIZER_TASK_STACKSIZE);
 
 static void stabilizerTask(void* param);
 static void testProps(sensorData_t *sensors);
@@ -190,8 +192,7 @@ void stabilizerInit(StateEstimatorType estimator)
   estimatorType = getStateEstimator();
   controllerType = getControllerType();
 
-  xTaskCreate(stabilizerTask, STABILIZER_TASK_NAME,
-              STABILIZER_TASK_STACKSIZE, NULL, STABILIZER_TASK_PRI, NULL);
+  STATIC_MEM_TASK_CREATE(stabilizerTask, stabilizerTask, STABILIZER_TASK_NAME, NULL, STABILIZER_TASK_PRI);
 
   isInit = true;
 }
@@ -500,7 +501,7 @@ static void testProps(sensorData_t *sensors)
         nrFailedTests++;
         for (int j = 0; j < 3; j++)
         {
-          motorsBeep(m, true, testsound[m], (uint16_t)(MOTORS_TIM_CLK_FREQ / A4)/ 20);
+          motorsBeep(m, true, testsound[m], (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / A4)/ 20);
           vTaskDelay(M2T(MOTORS_TEST_ON_TIME_MS));
           motorsBeep(m, false, 0, 0);
           vTaskDelay(M2T(100));
@@ -512,7 +513,7 @@ static void testProps(sensorData_t *sensors)
     {
       for (int m = 0; m < NBR_OF_MOTORS; m++)
       {
-        motorsBeep(m, true, testsound[m], (uint16_t)(MOTORS_TIM_CLK_FREQ / A4)/ 20);
+        motorsBeep(m, true, testsound[m], (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / A4)/ 20);
         vTaskDelay(M2T(MOTORS_TEST_ON_TIME_MS));
         motorsBeep(m, false, 0, 0);
         vTaskDelay(M2T(MOTORS_TEST_DELAY_TIME_MS));
@@ -583,7 +584,7 @@ LOG_GROUP_START(stabilizer)
 LOG_ADD(LOG_FLOAT, roll, &state.attitude.roll)
 LOG_ADD(LOG_FLOAT, pitch, &state.attitude.pitch)
 LOG_ADD(LOG_FLOAT, yaw, &state.attitude.yaw)
-LOG_ADD(LOG_UINT16, thrust, &control.thrust)
+LOG_ADD(LOG_FLOAT, thrust, &control.thrust)
 
 STATS_CNT_RATE_LOG_ADD(rtStab, &stabilizerRate)
 LOG_ADD(LOG_UINT32, intToOut, &inToOutLatency)

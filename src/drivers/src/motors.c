@@ -42,17 +42,15 @@
 //Logging includes
 #include "log.h"
 
-#define SPECIAL_MOTOR 3 // M3 has a separate timer (TIM4)
-
 static uint16_t motorsBLConvBitsTo16(uint16_t bits);
 static uint16_t motorsBLConv16ToBits(uint16_t bits);
-static uint16_t motorsConvBitsTo16(uint16_t bits, uint16_t period);
-static uint16_t motorsConv16ToBits(uint16_t bits, uint16_t period);
+static uint16_t motorsConvBitsTo16(uint16_t bits);
+static uint16_t motorsConv16ToBits(uint16_t bits);
 
-uint16_t motor_ratios[] = {0, 0, 0, 0};
-uint16_t motor_conv_ratios[] = {0,0,0,0};
-uint32_t motor_periods[]= {MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD, MOTORS_PWM_PERIOD};
+uint32_t motor_ratios[] = {0, 0, 0, 0};
 
+void motorsPlayTone(uint16_t frequency, uint16_t duration_msec);
+void motorsPlayMelody(uint16_t *notes);
 void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio);
 
 #include "motors_def_cf2.c"
@@ -61,7 +59,7 @@ const MotorPerifDef** motorMap;  /* Current map configuration */
 
 const uint32_t MOTORS[] = { MOTOR_M1, MOTOR_M2, MOTOR_M3, MOTOR_M4 };
 
-const uint16_t testsound[NBR_OF_MOTORS] = {A6, A7, F7, D7 };
+const uint16_t testsound[NBR_OF_MOTORS] = {A4, A5, F5, D5 };
 
 static bool isInit = false;
 
@@ -77,20 +75,15 @@ static uint16_t motorsBLConv16ToBits(uint16_t bits)
   return (MOTORS_BL_PWM_CNT_FOR_HIGH + ((bits * MOTORS_BL_PWM_CNT_FOR_HIGH) / 0xFFFF));
 }
 
-static uint16_t motorsConvBitsTo16(uint16_t bits, uint16_t period)
+static uint16_t motorsConvBitsTo16(uint16_t bits)
 {
- // given the pwm period, map the capture compare to 0-65536
-  float dutyCycle = (float)(bits)/(period+1);
-  return (uint16_t)(dutyCycle*(UINT16_MAX));
+  return ((bits) << (16 - MOTORS_PWM_BITS));
 }
 
-static uint16_t motorsConv16ToBits(uint16_t bits, uint16_t period)
+static uint16_t motorsConv16ToBits(uint16_t bits)
 {
-// given the pwm period, map the ratio (0-65536) to the proper period
-  float dutyCycle = (float)bits/(UINT16_MAX);
-  return (uint16_t)((period+1)*dutyCycle);
+  return ((bits) >> (16 - MOTORS_PWM_BITS) & ((1 << MOTORS_PWM_BITS) - 1));
 }
-
 
 /* Public functions */
 
@@ -150,7 +143,6 @@ void motorsInit(const MotorPerifDef** motorMapSelect)
     TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
     TIM_TimeBaseStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(motorMap[i]->tim, &TIM_TimeBaseStructure);
-    TIM_ARRPreloadConfig(motorMap[i]->tim, ENABLE);
 
     // PWM channels configuration (All identical!)
     TIM_OCInitStructure.TIM_OCMode = TIM_OCMode_PWM1;
@@ -208,12 +200,12 @@ bool motorsTest(void)
     if (motorMap[i]->drvType == BRUSHED)
     {
 #ifdef ACTIVATE_STARTUP_SOUND
-      motorsBeep(MOTORS[i], true, testsound[i], 12000);
+      motorsBeep(MOTORS[i], true, testsound[i], (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / A4)/ 20);
       vTaskDelay(M2T(MOTORS_TEST_ON_TIME_MS));
       motorsBeep(MOTORS[i], false, 0, 0);
       vTaskDelay(M2T(MOTORS_TEST_DELAY_TIME_MS));
 #else
-      motorsSetRatio(MOTORS[i], 8000);
+      motorsSetRatio(MOTORS[i], MOTORS_TEST_RATIO);
       vTaskDelay(M2T(MOTORS_TEST_ON_TIME_MS));
       motorsSetRatio(MOTORS[i], 0);
       vTaskDelay(M2T(MOTORS_TEST_DELAY_TIME_MS));
@@ -243,18 +235,17 @@ void motorsSetRatio(uint32_t id, uint16_t ithrust)
       float percentage = volts / supply_voltage;
       percentage = percentage > 1.0f ? 1.0f : percentage;
       ratio = percentage * UINT16_MAX;
+      motor_ratios[id] = ratio;
+
     }
   #endif
-    motor_ratios[id] = ratio;
-    uint16_t newRatio = motorsConv16ToBits(ratio, motor_periods[id]);
-    motor_conv_ratios[id] = newRatio;
     if (motorMap[id]->drvType == BRUSHLESS)
     {
       motorMap[id]->setCompare(motorMap[id]->tim, motorsBLConv16ToBits(ratio));
     }
     else
     {
-      motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
+      motorMap[id]->setCompare(motorMap[id]->tim, motorsConv16ToBits(ratio));
     }
   }
 }
@@ -270,125 +261,68 @@ int motorsGetRatio(uint32_t id)
   }
   else
   {
-    ratio = motorsConvBitsTo16(motorMap[id]->getCompare(motorMap[id]->tim), motor_periods[id]);
+    ratio = motorsConvBitsTo16(motorMap[id]->getCompare(motorMap[id]->tim));
   }
 
   return ratio;
 }
 
-#ifdef SINGLE_MOTOR_CHIRP
-#pragma message("Single motor chirp")
 void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
 {
-  uint16_t newPeriod;
-  uint16_t newRatio;
+  TIM_TimeBaseInitTypeDef  TIM_TimeBaseStructure;
 
   ASSERT(id < NBR_OF_MOTORS);
 
+  TIM_TimeBaseStructInit(&TIM_TimeBaseStructure);
+
   if (enable)
   {
-    newPeriod = (uint16_t)(MOTORS_TIM_CLK_FREQ / frequency);
-    newRatio = motorsConv16ToBits(ratio, newPeriod);
+    TIM_TimeBaseStructure.TIM_Prescaler = (5 - 1);
+    TIM_TimeBaseStructure.TIM_Period = (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency);
   }
   else
   {
-    newPeriod = motorMap[id]->timPeriod;
-    newRatio = 0;
+    TIM_TimeBaseStructure.TIM_Period = motorMap[id]->timPeriod;
+    TIM_TimeBaseStructure.TIM_Prescaler = motorMap[id]->timPrescaler;
   }
 
-  motor_ratios[id] = ratio;
-  motor_conv_ratios[id] = newRatio;
-  motor_periods[id] = newPeriod;
   // Timer configuration
-  TIM_CtrlPWMOutputs(motorMap[id]->tim, DISABLE);
-  motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
-  TIM_SetAutoreload(motorMap[id]->tim, newPeriod);
-  TIM_CtrlPWMOutputs(motorMap[id]->tim, ENABLE);
+  TIM_TimeBaseInit(motorMap[id]->tim, &TIM_TimeBaseStructure);
+  motorMap[id]->setCompare(motorMap[id]->tim, ratio);
 }
 
-void motorsSetFrequency( uint16_t frequency)
+
+// Play a tone with a given frequency and a specific duration in milliseconds (ms)
+void motorsPlayTone(uint16_t frequency, uint16_t duration_msec)
 {
-  // only set M3, on TIM4
-  uint16_t period;
-  uint16_t newRatio;
-  bool turnOn = frequency > 0; // maybe we should enforce a minimum?
-  const int id = SPECIAL_MOTOR;
- 
-  if (turnOn)
+  motorsBeep(MOTOR_M1, true, frequency, (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency)/ 20);
+  motorsBeep(MOTOR_M2, true, frequency, (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency)/ 20);
+  motorsBeep(MOTOR_M3, true, frequency, (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency)/ 20);
+  motorsBeep(MOTOR_M4, true, frequency, (uint16_t)(MOTORS_TIM_BEEP_CLK_FREQ / frequency)/ 20);
+  vTaskDelay(M2T(duration_msec));
+  motorsBeep(MOTOR_M1, false, frequency, 0);
+  motorsBeep(MOTOR_M2, false, frequency, 0);
+  motorsBeep(MOTOR_M3, false, frequency, 0);
+  motorsBeep(MOTOR_M4, false, frequency, 0);
+}
+
+// Plays a melody from a note array
+void motorsPlayMelody(uint16_t *notes)
+{
+  int i = 0;
+  uint16_t note;      // Note in hz
+  uint16_t duration;  // Duration in ms
+
+  do
   {
-    period = (uint16_t)(MOTORS_TIM_CLK_FREQ / frequency);
-  }
-  else
-  {
-    period = MOTORS_PWM_PERIOD;
-  }
-
-  if (motor_periods[id] != period) {
-    // don't make changes unless we must
-    motor_periods[id] = period;
-
-    newRatio = motorsConv16ToBits(motor_ratios[id], period);
-    motor_conv_ratios[id] = newRatio;
-    TIM_CtrlPWMOutputs(motorMap[id]->tim, DISABLE);
-    motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
-    TIM_SetAutoreload(motorMap[id]->tim, period);
-    TIM_CtrlPWMOutputs(motorMap[id]->tim, ENABLE);
-  } 
-
+    note = notes[i++];
+    duration = notes[i++];
+    motorsPlayTone(note, duration);
+  } while (duration != 0);
 }
-#else
-
-#pragma message("All motor chirp")
-void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)
-{
-    if (!enable) {
-	    frequency = 0;
-	    ratio = 0;
-    }
-    motorsSetRatio(id, 0xff);
-    motorsSetFrequency(frequency);
-}
-
-void motorsSetFrequency( uint16_t frequency)
-{
-  // ignore the id for now
-  uint16_t period;
-  uint16_t newRatio;
-  bool turnOn = frequency > 0;
- 
-    if (turnOn)
-    {
-      period = (uint16_t)(MOTORS_TIM_CLK_FREQ / frequency);
-    }
-    else
-    {
-      period = MOTORS_PWM_PERIOD;
-    }
-
-      for (int id=0; id < NBR_OF_MOTORS; id++) {
-        if (motor_periods[id] != period) {
-        // don't make changes unless we must
-        motor_periods[id] = period;
-
-	    newRatio = motorsConv16ToBits(motor_ratios[id], period);
-	    motor_conv_ratios[id] = newRatio;
-	    TIM_CtrlPWMOutputs(motorMap[id]->tim, DISABLE);
-	    motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
-	    TIM_SetAutoreload(motorMap[id]->tim, period);
-	    TIM_CtrlPWMOutputs(motorMap[id]->tim, ENABLE);
-      }
-    }
-
-}
-#endif
-
 LOG_GROUP_START(pwm)
-LOG_ADD(LOG_UINT16, rat1, motor_conv_ratios)
-LOG_ADD(LOG_UINT16, rat2, motor_conv_ratios+1)
-LOG_ADD(LOG_UINT16, rat3, motor_conv_ratios+2)
-LOG_ADD(LOG_UINT16, rat4, motor_conv_ratios+3)
-LOG_ADD(LOG_UINT16, per1, motor_periods)
-LOG_ADD(LOG_UINT16, per2, motor_periods+1)
-LOG_ADD(LOG_UINT16, per3, motor_periods+2)
-LOG_ADD(LOG_UINT16, per4, motor_periods+3)
+LOG_ADD(LOG_UINT32, m1_pwm, &motor_ratios[0])
+LOG_ADD(LOG_UINT32, m2_pwm, &motor_ratios[1])
+LOG_ADD(LOG_UINT32, m3_pwm, &motor_ratios[2])
+LOG_ADD(LOG_UINT32, m4_pwm, &motor_ratios[3])
 LOG_GROUP_STOP(pwm)

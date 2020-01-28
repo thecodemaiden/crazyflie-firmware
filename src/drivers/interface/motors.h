@@ -41,13 +41,13 @@
 
 /******** Defines ********/
 
-// The following defines gives a PWM of 16 bits at ~328KHz for a sysclock of 168MHz
+// The following defines gives a PWM of 8 bits at ~328KHz for a sysclock of 168MHz
 // CF2 PWM ripple is filtered better at 328kHz. At 168kHz the NCP702 regulator is affected.
 #define TIM_CLOCK_HZ 84000000
-#define MOTORS_PWM_BITS           16
-#define MOTORS_PWM_PERIOD         256 // 
+#define MOTORS_PWM_BITS           8
+#define MOTORS_PWM_PERIOD         ((1<<MOTORS_PWM_BITS) - 1)
 #define MOTORS_PWM_PRESCALE       0
-#define MOTORS_TIM_CLK_FREQ  (84000000L / (MOTORS_PWM_PRESCALE +1))
+#define MOTORS_TIM_BEEP_CLK_FREQ  (84000000L / 5)
 #define MOTORS_POLARITY           TIM_OCPolarity_High
 
 // Abstraction of ST lib functions
@@ -59,7 +59,8 @@
 
 // Compensate thrust depending on battery voltage so it will produce about the same
 // amount of thrust independent of the battery voltage. Based on thrust measurement.
-//#define ENABLE_THRUST_BAT_COMPENSATED
+// Not applied for brushless motor setup.
+#define ENABLE_THRUST_BAT_COMPENSATED
 
 //#define ENABLE_ONESHOT125
 
@@ -253,10 +254,6 @@ void motorsTestTask(void* params);
  *     motorsBeep(false, 0, 0); *
  * */
 void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio);
-/**
- * Set the PWM frequency, used for sound on brushed motors
- */
-void motorsSetFrequency(uint16_t frequency);
-uint16_t motorsGetFrequency();
+
 #endif /* __MOTORS_H__ */
 
