@@ -145,6 +145,7 @@ void motorsInit(const MotorPerifDef** motorMapSelect)
     TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
     TIM_TimeBaseStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(motorMap[i]->tim, &TIM_TimeBaseStructure);
+    TIM_ARRPreloadConfig(motorMap[i]->tim, ENABLE);
 
     // PWM channels configuration (All identical!)
     TIM_OCInitStructure.TIM_OCMode = TIM_OCMode_PWM1;
@@ -237,10 +238,10 @@ void motorsSetRatio(uint32_t id, uint16_t ithrust)
       float percentage = volts / supply_voltage;
       percentage = percentage > 1.0f ? 1.0f : percentage;
       ratio = percentage * UINT16_MAX;
-      motor_ratios[id] = ratio;
 
     }
   #endif
+    motor_ratios[id] = ratio;
     if (motorMap[id]->drvType == BRUSHLESS)
     {
       motorMap[id]->setCompare(motorMap[id]->tim, motorsBLConv16ToBits(ratio));
@@ -267,6 +268,26 @@ int motorsGetRatio(uint32_t id)
   }
 
   return ratio;
+}
+
+void motorsSetFrequency(int id, uint16_t frequency)
+{
+  // XXX: no checks for BRUSHLESS
+  ASSERT(id < NBR_OF_MOTORS);
+  uint16_t oldRatio = motorsConvBitsTo16(motorMap[id]->getCompare(motorMap[id]->tim), id);
+  //uint16_t oldPeriod = motor_periods[id];
+
+  uint16_t period = MOTORS_PWM_PERIOD;
+  if (frequency > 0) {
+     period = (uint16_t)(TIM_CLOCK_HZ/frequency)-1;
+  }
+  motor_periods[id] = period;
+  uint16_t newRatio = motorsConv16ToBits(oldRatio,id);
+  motor_ratios[id] = newRatio;
+
+  
+  TIM_SetAutoreload(motorMap[id]->tim, period);
+  motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
 }
 
 void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio)

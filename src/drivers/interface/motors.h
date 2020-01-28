@@ -244,7 +244,7 @@ int motorsGetRatio(uint32_t id);
  */
 void motorsTestTask(void* params);
 
-/* Set PWM frequency for motor controller
+/* Set (low) PWM frequency for motor controller
  * This function will set all motors into a "beep"-mode,
  * each of the motor will turned on with a given ratio and frequency.
  * The higher the ratio the higher the given power to the motors.
@@ -254,6 +254,9 @@ void motorsTestTask(void* params);
  *     motorsBeep(false, 0, 0); *
  * */
 void motorsBeep(int id, bool enable, uint16_t frequency, uint16_t ratio);
+
+/* Set (high, > 1281) PWM frequency for a single motor*/
+void motorsSetFrequency(int id, uint16_t frequency);
 
 #endif /* __MOTORS_H__ */
 
