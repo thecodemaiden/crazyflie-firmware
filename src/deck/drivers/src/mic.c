@@ -11,7 +11,7 @@
 
 #include "arm_math.h"
 
-#define SAMPLE_RATE (8000)
+#define SAMPLE_RATE (48000)
 #define ADC_SAMPLE_PERIOD ((84000000L/SAMPLE_RATE)-1)
 
 
@@ -221,6 +221,9 @@ static void processMicBuffer()
     filteredOut = 0.8f*filteredOut + 0.2f*(lastValue - ADC_OFFSET);
     fftWindow[ii] = (float32_t)lastValue - ADC_OFFSET;
   }
+// the dominant frequency will always be the motor noise
+// so search above it to find messages
+#define START_BIN 256
   nReads = nReads+1;
   readyBuffer = -1;
   // do the FFT here
@@ -229,9 +232,9 @@ static void processMicBuffer()
   // change the complex values back to real values
   arm_cmplx_mag_f32(fftOut, fftWindow, BUFFER_SIZE/2);
   // get the max frequency, ignore bin 0
-  arm_max_f32(fftWindow+1, BUFFER_SIZE/2-1, &maxFreqVal, &maxBin);
+  arm_max_f32(fftWindow+START_BIN, BUFFER_SIZE/2-START_BIN, &maxFreqVal, &maxBin);
   // calculate the max frequency from the bin
-  maxFreq = (float)(maxBin+1)*((float)SAMPLE_RATE/BUFFER_SIZE);
+  maxFreq = (float)(maxBin+START_BIN)*((float)SAMPLE_RATE/BUFFER_SIZE);
 }
 
 static void micReadTimer(xTimerHandle timer)

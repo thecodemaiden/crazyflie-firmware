@@ -66,6 +66,7 @@
 #include "extrx.h"
 #include "app.h"
 #include "static_mem.h"
+#include "motor_sound.h"
 
 /* Private variable */
 static bool selftestPassed;
@@ -182,6 +183,7 @@ void systemTask(void *arg)
 #ifdef PROXIMITY_ENABLED
   proximityInit();
 #endif
+  motorSoundInit();
 
   //Test the modules
   pass &= systemTest();
@@ -192,6 +194,7 @@ void systemTask(void *arg)
   pass &= estimatorKalmanTaskTest();
   pass &= deckTest();
   pass &= soundTest();
+  pass &= motorSoundTest();
   pass &= memTest();
   pass &= watchdogNormalStartTest();
 

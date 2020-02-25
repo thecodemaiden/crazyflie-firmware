@@ -1,7 +1,6 @@
 /**
- * Read input from a microphone
- * Someday this will be done with DMA and FFT but right now just
- * fill a ring buffer with samples and output the window energy
+ * Read input from a microphone using DMA from the ADC
+ * Then do an FFT to find the dominant frequency
  **/
 
 #ifndef __MICDECK_H__
