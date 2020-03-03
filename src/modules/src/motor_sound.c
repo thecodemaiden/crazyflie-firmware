@@ -74,8 +74,8 @@ static void setupNextChirp()
 
 static void setupMessage()
 {
-  int16_t totalFChange = (int16_t)(chirpRate * chirpLen / 1000.0);
-  _msgParams.dF = (int16_t)(chirpRate * SND_TASK_INTERVAL / 1000.0);
+  int16_t totalFChange = (int16_t)((float)chirpRate * chirpLen / 1000.0f);
+  _msgParams.dF = (int16_t)((float)chirpRate * SND_TASK_INTERVAL / 1000.0f);
   _msgParams.bottomF = centerFreq - totalFChange/2;
   _msgParams.topF = centerFreq + totalFChange/2;
   _msgParams.message = message;
