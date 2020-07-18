@@ -33,6 +33,7 @@
 #include "FreeRTOS.h"
 #include "timers.h"
 #include "semphr.h"
+#include "static_mem.h"
 
 #include "led.h"
 
@@ -167,11 +168,12 @@ static void updateActive(led_t led);
 
 //State of every sequence for every led: LEDSEQ_STOP if stopped or the current
 //step
-static int state[LED_NUM][SEQ_NUM];
+NO_DMA_CCM_SAFE_ZERO_INIT static int state[LED_NUM][SEQ_NUM];
 //Active sequence for each led
-static int activeSeq[LED_NUM];
+NO_DMA_CCM_SAFE_ZERO_INIT static int activeSeq[LED_NUM];
 
-static xTimerHandle timer[LED_NUM];
+NO_DMA_CCM_SAFE_ZERO_INIT static xTimerHandle timer[LED_NUM];
+NO_DMA_CCM_SAFE_ZERO_INIT static StaticTimer_t timerBuffer[LED_NUM];
 
 static xSemaphoreHandle ledseqSem;
 
@@ -195,8 +197,9 @@ void ledseqInit()
   }
 
   //Init the soft timers that runs the led sequences for each leds
-  for(i=0; i<LED_NUM; i++)
-    timer[i] = xTimerCreate("ledseqTimer", M2T(1000), pdFALSE, (void*)i, runLedseq);
+  for(i=0; i<LED_NUM; i++) {
+    timer[i] = xTimerCreateStatic("ledseqTimer", M2T(1000), pdFALSE, (void*)i, runLedseq, &timerBuffer[i]);
+  }
 
   vSemaphoreCreateBinary(ledseqSem);
 
