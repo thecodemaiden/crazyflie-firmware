@@ -35,6 +35,7 @@
 #include "log.h"
 #include "param.h"
 #include "range.h"
+#include "static_mem.h"
 
 #include "i2cdev.h"
 #include "zranger.h"

@@ -67,6 +67,7 @@
 #include "app.h"
 #include "static_mem.h"
 #include "motor_sound.h"
+#include "peer_localization.h"
 
 /* Private variable */
 static bool selftestPassed;
@@ -124,6 +125,7 @@ void systemInit(void)
   ledseqInit();
   pmInit();
   buzzerInit();
+  peerLocalizationInit();
 
 #ifdef APP_ENABLED
   appInit();
@@ -197,6 +199,7 @@ void systemTask(void *arg)
   pass &= motorSoundTest();
   pass &= memTest();
   pass &= watchdogNormalStartTest();
+  pass &= peerLocalizationTest();
 
   //Start the firmware
   if(pass)
