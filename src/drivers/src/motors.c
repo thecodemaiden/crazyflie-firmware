@@ -286,6 +286,7 @@ void motorsSetFrequency(int id, uint16_t frequency)
   motor_ratios[id] = newRatio;
 
   
+  // TODO: set the whole structure at once
   TIM_SetAutoreload(motorMap[id]->tim, period);
   motorMap[id]->setCompare(motorMap[id]->tim, newRatio);
 }

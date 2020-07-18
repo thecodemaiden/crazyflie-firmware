@@ -95,7 +95,13 @@ static void updateChirpFreq()
   } 
 
   if (motorFreq != lastFreq) {
+#if ALL_MOTOR_CHIRP
+#pragma message "Using all motors to chirp"
+    for (int ii=0; ii<4; ii++) motorsSetFrequency(ii,motorFreq);
+#else
+#pragma message "Using M4 only for chirp"
       motorsSetFrequency(3, motorFreq); 
+#endif
       lastFreq = motorFreq;
   }
 
