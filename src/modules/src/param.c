@@ -667,8 +667,6 @@ unsigned int paramGetUint(int varid)
 {
   return (unsigned int)paramGetInt(varid);
 }
-<<<<<<< HEAD
-=======
 
 void paramSetInt(int varid, int valuei)
 {
@@ -711,6 +709,3 @@ void paramSetFloat(int varid, float valuef)
 }
 
 
-
-
->>>>>>> master

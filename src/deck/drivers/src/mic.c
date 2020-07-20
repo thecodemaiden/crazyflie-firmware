@@ -10,24 +10,25 @@
 #include "log.h"
 
 #include "arm_math.h"
-
-#define SAMPLE_RATE (48000)
-#define ADC_SAMPLE_PERIOD ((84000000L/SAMPLE_RATE)-1)
-
+#include "arm_const_structs.h"
+#include "motor_sound.h"
 
 static bool isInit = false;
 static bool isTimerInit = false;
 static bool isAdcInit = false;
 static bool isDmaInit = false;
 static bool isGpioInit = false;
-static bool isFftInit = false;
 
 static uint16_t dmaBufferBottom[BUFFER_SIZE];
 static uint16_t dmaBufferTop[BUFFER_SIZE];
 //TODO: when we premultiply with chirp it will be twice as long
 // and we will need another buffer of the same size for the chirp coeffs
 static float32_t fftWindow[BUFFER_SIZE];
-static float32_t fftOut[BUFFER_SIZE];
+static float32_t fftChirped[2*BUFFER_SIZE];
+static float32_t chirpTemplate[2*BUFFER_SIZE]; // complex chirp
+
+static uint16_t chirpLen = 0;
+static uint16_t chirpSlope = 0;
 
 static int8_t readyBuffer = -1; // changes to 0 or 1 as buffers are filled by DMA
 static float windowEnergy = 0;
@@ -43,8 +44,9 @@ static xTimerHandle timer;
 static void micReadTimer(xTimerHandle timer);
 
 static NVIC_InitTypeDef NVIC_InitStructure;
-static arm_rfft_fast_instance_f32 fftParams;
+const static arm_cfft_instance_f32*  fftParams = &arm_cfft_sR_f32_len1024;
 
+#define E_PI ((float32_t)3.14159265)
 static void micGpioInit(void)
 {
   /* Populate structure with RESET values. */
@@ -174,11 +176,6 @@ static void micSamplerInit(void)
   isTimerInit = true;
 }
 
-static void micFftInit(void)
-{
-  isFftInit = (arm_rfft_fast_init_f32(&fftParams, BUFFER_SIZE) == ARM_MATH_SUCCESS);
-}
-
 void micInit(DeckInfo *info)
 {
   if (isInit) return;
@@ -186,7 +183,6 @@ void micInit(DeckInfo *info)
   if (!isAdcInit) micAdcInit();
   if (!isDmaInit) micDmaInit();
   if (!isTimerInit) micSamplerInit();
-  if (!isFftInit) micFftInit();
 
   isInit = true;
   timer = xTimerCreate("micTimer", M2T(10),pdTRUE,NULL,micReadTimer);
@@ -200,18 +196,56 @@ bool micTest()
   return isDmaInit && reallyDidInit; 
 }
 
-// process data windows if available
-static void processMicBuffer()
+static void prepareChirpMultiplier()
 {
-#define ADC_OFFSET (2047.0f)
-  uint16_t *dmaBuffer = NULL;
-  if (readyBuffer < 0) return;
-
-  if (readyBuffer == 0) {
-    dmaBuffer = dmaBufferTop;
-  }else{
-    dmaBuffer = dmaBufferBottom;
+  // this is using a lot of RAM....
+  static float32_t lChpBuffer[BUFFER_SIZE];
+  static float32_t argBuffer[BUFFER_SIZE];
+  int ii;
+  float32_t chpFactor;
+  // prepare the vector -N/2 .. N/2
+  float32_t d = (float32_t)(BUFFER_SIZE)/(BUFFER_SIZE-1);
+  for (ii=0; ii<BUFFER_SIZE; ii++) {
+    lChpBuffer[ii] = -(BUFFER_SIZE>>1) + ii*d;
   }
+  
+  // copy it into the argument buffer too
+  arm_copy_f32(lChpBuffer, argBuffer, BUFFER_SIZE);
+
+  float32_t fs = (float32_t)(SAMPLE_RATE);
+  // create the chirp modulation factors (lChp)
+  chpFactor = ((float32_t)chirpSlope*BUFFER_SIZE)/(2*fs*fs);
+  arm_scale_f32(lChpBuffer, chpFactor, lChpBuffer, BUFFER_SIZE);
+
+  // make the argument of the sin/cos -- 2*pi*k/N
+  float32_t argScale = (-2*E_PI*15000/BUFFER_SIZE);
+  arm_scale_f32(argBuffer, argScale, argBuffer, BUFFER_SIZE);
+
+  // make the real and imaginary parts of the complex sinusoid
+  for (ii=0; ii<BUFFER_SIZE; ii++) {
+    chirpTemplate[2*ii + 0] = arm_cos_f32(argBuffer[ii]);
+    chirpTemplate[2*ii + 1] = arm_sin_f32(argBuffer[ii]);
+  }
+
+  // finally... chirp the complex sinusoid!
+  //XXXarm_cmplx_mult_real_f32(chirpTemplate, lChpBuffer, chirpTemplate, BUFFER_SIZE);
+
+}
+
+static void updateChirpParams()
+{
+  const MotorSoundParameters *p = currentMotorParams();
+
+  bool slopeChanged = (p->chirpSlope != chirpSlope);
+  chirpLen = p->chirpLen;
+  chirpSlope = p->chirpSlope;
+
+  if (slopeChanged) prepareChirpMultiplier();
+}
+
+
+static void convertDataToFloat(uint16_t *dmaBuffer)
+{
   // PROCESS THE DATA QUICKLY!!
   windowEnergy = 0;
   nInterrupts = nInterrupts+1;
@@ -221,18 +255,35 @@ static void processMicBuffer()
     filteredOut = 0.8f*filteredOut + 0.2f*(lastValue - ADC_OFFSET);
     fftWindow[ii] = (float32_t)lastValue - ADC_OFFSET;
   }
-// the dominant frequency will always be the motor noise
-// so search above it to find messages
-#define START_BIN 256
-  nReads = nReads+1;
+}
+
+// process data windows if available
+static void processMicBuffer()
+{
+  uint16_t *dmaBuffer = NULL;
+  if (readyBuffer < 0) return;
+
+  if (readyBuffer == 0) {
+    dmaBuffer = dmaBufferTop;
+  }else{
+    dmaBuffer = dmaBufferBottom;
+  }
+  updateChirpParams();
   readyBuffer = -1;
-  // do the FFT here
+
+  // copy the ADC data as floating point
+  convertDataToFloat(dmaBuffer);
+  nReads = nReads+1;
+  // multiply by the complex chirp
+  //arm_cmplx_mult_real_f32(chirpTemplate, fftWindow, fftChirped, BUFFER_SIZE);
+  arm_copy_f32(chirpTemplate, fftChirped, 2*BUFFER_SIZE);
+  // take the fft of the chirped audio
+  arm_cfft_f32(fftParams, fftChirped, 0, 0);
+  // get the (real) magnitude of the complex fft
+  arm_cmplx_mag_f32(fftChirped, fftWindow, BUFFER_SIZE);
+  // get the max frequency detected in one half of the fft, above START_BIN
   uint32_t maxBin = 0;
-  arm_rfft_fast_f32(&fftParams, fftWindow, fftOut, 0);
-  // change the complex values back to real values
-  arm_cmplx_mag_f32(fftOut, fftWindow, BUFFER_SIZE/2);
-  // get the max frequency, ignore bin 0
-  arm_max_f32(fftWindow+START_BIN, BUFFER_SIZE/2-START_BIN, &maxFreqVal, &maxBin);
+  arm_max_f32(fftWindow+START_BIN, BUFFER_SIZE/2 - START_BIN, &maxFreqVal, &maxBin);
   // calculate the max frequency from the bin
   maxFreq = (float)(maxBin+START_BIN)*((float)SAMPLE_RATE/BUFFER_SIZE);
 }
@@ -260,8 +311,6 @@ LOG_GROUP_START(mic)
   LOG_ADD(LOG_FLOAT, filter, &filteredOut)
   LOG_ADD(LOG_UINT16, rawRead, &lastValue)
   LOG_ADD(LOG_UINT16, triggers, &nInterrupts)
-  //LOG_ADD(LOG_UINT16, nRead, &nReads)
- // LOG_ADD(LOG_UINT16, adc, &adcInterrupts)
   LOG_ADD(LOG_FLOAT, maxFreq, &maxFreq) 
 LOG_GROUP_STOP(mic)
 

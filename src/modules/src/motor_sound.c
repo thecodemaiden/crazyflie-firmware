@@ -31,10 +31,9 @@ static struct {
   uint8_t msgCounter;
 } _msgParams;
 
+MotorSoundParameters _chirpParams = {16000, 500, 2000};
+
 static bool isInit=false;
-static uint16_t centerFreq = 16000; // in Hz
-static uint16_t chirpLen = 500; // in milliseconds
-static int16_t chirpRate = 2000; // in Hz/s <=> Hz^2
 static uint8_t message = 0xaa;
 
 static bool requestChirp = false;
@@ -74,10 +73,10 @@ static void setupNextChirp()
 
 static void setupMessage()
 {
-  int16_t totalFChange = (int16_t)((float)chirpRate * chirpLen / 1000.0f);
-  _msgParams.dF = (int16_t)((float)chirpRate * SND_TASK_INTERVAL / 1000.0f);
-  _msgParams.bottomF = centerFreq - totalFChange/2;
-  _msgParams.topF = centerFreq + totalFChange/2;
+  int16_t totalFChange = (int16_t)((float)_chirpParams.chirpSlope * _chirpParams.chirpLen / 1000.0f);
+  _msgParams.dF = (int16_t)((float)_chirpParams.chirpSlope * SND_TASK_INTERVAL / 1000.0f);
+  _msgParams.bottomF = _chirpParams.centerFreq - totalFChange/2;
+  _msgParams.topF = _chirpParams.centerFreq + totalFChange/2;
   _msgParams.message = message;
   _msgParams.msgCounter = 0;
   inPause = false;
@@ -155,10 +154,14 @@ bool motorSoundTest(void)
   return isInit;
 }
 
+const MotorSoundParameters *currentMotorParams()
+{
+  return &_chirpParams;
+}
 PARAM_GROUP_START(chirp)
-PARAM_ADD(PARAM_UINT16, length, &chirpLen)
-PARAM_ADD(PARAM_UINT16, center, &centerFreq)
-PARAM_ADD(PARAM_INT16, slope, &chirpRate)
+PARAM_ADD(PARAM_UINT16, length, &(_chirpParams.chirpLen))
+PARAM_ADD(PARAM_UINT16, center, &(_chirpParams.centerFreq))
+PARAM_ADD(PARAM_INT16, slope, &(_chirpParams.chirpSlope))
 PARAM_ADD(PARAM_UINT8, message, &message)
 PARAM_ADD(PARAM_UINT8, goChirp, &requestChirp)
 PARAM_GROUP_STOP(chirp)

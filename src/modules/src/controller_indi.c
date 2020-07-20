@@ -24,10 +24,7 @@
  */
 
 #include "controller_indi.h"
-<<<<<<< HEAD
-=======
 #include "math3d.h"
->>>>>>> master
 
 static float thrust_threshold = 300.0f;
 static float bound_control_input = 32000.0f;
@@ -35,29 +32,20 @@ static float bound_control_input = 32000.0f;
 static attitude_t attitudeDesired;
 static attitude_t rateDesired;
 static float actuatorThrust;
-<<<<<<< HEAD
-static float roll_kp = 6.0f;
-static float pitch_kp = 6.0f;
-static float yaw_kp = 6.0f;
-=======
 static float roll_kp = 5.0f;
 static float pitch_kp = 5.0f;
 static float yaw_kp = 5.0f;
 
 static float attYawError; 
->>>>>>> master
 
 static float r_roll;
 static float r_pitch;
 static float r_yaw;
 static float accelz;
 
-<<<<<<< HEAD
-=======
 static vector_t refOuterINDI;				// Reference values from outer loop INDI
 static bool outerLoopActive = false ; 		// if 1, outer loop INDI is activated
 
->>>>>>> master
 static struct IndiVariables indi = {
 		.g1 = {STABILIZATION_INDI_G1_P, STABILIZATION_INDI_G1_Q, STABILIZATION_INDI_G1_R},
 		.g2 = STABILIZATION_INDI_G2_R,
@@ -83,13 +71,8 @@ static inline void float_rates_zero(struct FloatRates *fr) {
 void indi_init_filters(void)
 {
 	// tau = 1/(2*pi*Fc)
-<<<<<<< HEAD
-	float tau = 1.0f / (2.0f * PI * indi.filt_cutoff);
-	float tau_r = 1.0f / (2.0f * PI * indi.filt_cutoff_r);
-=======
 	float tau = 1.0f / (2.0f * M_PI_F * indi.filt_cutoff);
 	float tau_r = 1.0f / (2.0f * M_PI_F * indi.filt_cutoff_r);
->>>>>>> master
 	float tau_axis[3] = {tau, tau, tau_r};
 	float sample_time = 1.0f / ATTITUDE_RATE;
 	// Filtering of gyroscope and actuators
@@ -126,8 +109,6 @@ static inline void finite_difference_from_filter(float *output, Butterworth2LowP
 	}
 }
 
-<<<<<<< HEAD
-=======
 static float capAngle(float angle) {
   float result = angle;
 
@@ -143,7 +124,6 @@ static float capAngle(float angle) {
 }
 
 
->>>>>>> master
 void controllerINDIInit(void)
 {
 	/*
@@ -160,10 +140,7 @@ void controllerINDIInit(void)
 
 	attitudeControllerInit(ATTITUDE_UPDATE_DT);
 	positionControllerInit();
-<<<<<<< HEAD
-=======
 	positionControllerINDIInit();
->>>>>>> master
 }
 
 bool controllerINDITest(void)
@@ -194,11 +171,7 @@ void controllerINDI(control_t *control, setpoint_t *setpoint,
 		}
 	}
 
-<<<<<<< HEAD
-	if (RATE_DO_EXECUTE(POSITION_RATE, tick)) {
-=======
 	if (RATE_DO_EXECUTE(POSITION_RATE, tick) && !outerLoopActive) {
->>>>>>> master
 		positionController(&actuatorThrust, &attitudeDesired, setpoint, state);
 	}
 
@@ -207,17 +180,6 @@ void controllerINDI(control_t *control, setpoint_t *setpoint,
 	 */
 	if (RATE_DO_EXECUTE(ATTITUDE_RATE, tick)) {
 
-<<<<<<< HEAD
-		// Switch between manual and automatic position control
-		if (setpoint->mode.z == modeDisable) {
-			actuatorThrust = setpoint->thrust;
-		}
-		if (setpoint->mode.x == modeDisable || setpoint->mode.y == modeDisable) {
-			attitudeDesired.roll = setpoint->attitude.roll;
-			attitudeDesired.pitch = setpoint->attitude.pitch;
-		}
-
-=======
 		// Call outer loop INDI (position controller)
 		if (outerLoopActive) {
 			positionControllerINDI(sensors, setpoint, state, &refOuterINDI);
@@ -258,22 +220,16 @@ void controllerINDI(control_t *control, setpoint_t *setpoint,
 		}
 		
 
->>>>>>> master
 //	    attitudeControllerCorrectAttitudePID(state->attitude.roll, state->attitude.pitch, state->attitude.yaw,
 //	                                attitudeDesired.roll, attitudeDesired.pitch, attitudeDesired.yaw,
 //	                                &rateDesired.roll, &rateDesired.pitch, &rateDesired.yaw);
 
 		rateDesired.roll = roll_kp*(attitudeDesired.roll - state->attitude.roll);
 		rateDesired.pitch = pitch_kp*(attitudeDesired.pitch - state->attitude.pitch);
-<<<<<<< HEAD
-		rateDesired.yaw = yaw_kp*(attitudeDesired.yaw - state->attitude.yaw);
-=======
 		//rateDesired.yaw = yaw_kp*(attitudeDesired.yaw - state->attitude.yaw);
 		attYawError = attitudeDesired.yaw - state->attitude.yaw;		
 		attYawError = capAngle(attYawError);
 		rateDesired.yaw = yaw_kp*attYawError;
-
->>>>>>> master
 
 		// For roll and pitch, if velocity mode, overwrite rateDesired with the setpoint
 		// value. Also reset the PID to avoid error buildup, which can lead to unstable
@@ -328,22 +284,11 @@ void controllerINDI(control_t *control, setpoint_t *setpoint,
 		float attitude_error_q = radians(rateDesired.pitch) - stateAttitudeRatePitch;
 		float attitude_error_r = radians(rateDesired.yaw) - stateAttitudeRateYaw;
 
-<<<<<<< HEAD
-		indi.angular_accel_ref.p = indi.reference_acceleration.err_p * attitude_error_p
-				- indi.reference_acceleration.rate_p * body_rates.p;
-
-		indi.angular_accel_ref.q = indi.reference_acceleration.err_q * attitude_error_q
-				- indi.reference_acceleration.rate_q * body_rates.q;
-
-		indi.angular_accel_ref.r = indi.reference_acceleration.err_r * attitude_error_r
-				- indi.reference_acceleration.rate_r * body_rates.r;
-=======
 		indi.angular_accel_ref.p = indi.reference_acceleration.err_p * attitude_error_p;
 
 		indi.angular_accel_ref.q = indi.reference_acceleration.err_q * attitude_error_q;
 
 		indi.angular_accel_ref.r = indi.reference_acceleration.err_r * attitude_error_r;
->>>>>>> master
 
 		/*
 		 * 5. Update the For each axis: delta_command = 1/control_effectiveness * (angular_acceleration_reference – angular_acceleration)
@@ -355,11 +300,7 @@ void controllerINDI(control_t *control, setpoint_t *setpoint,
 		//(they have significant inertia, see the paper mentioned in the header for more explanation)
 		indi.du.p = 1.0f / indi.g1.p * (indi.angular_accel_ref.p - indi.rate_d[0]);
 		indi.du.q = 1.0f / indi.g1.q * (indi.angular_accel_ref.q - indi.rate_d[1]);
-<<<<<<< HEAD
-		indi.du.r = 1.0f / (indi.g1.r + indi.g2) * (indi.angular_accel_ref.r - indi.rate_d[2] + indi.g2 * indi.du.r);
-=======
 		indi.du.r = 1.0f / (indi.g1.r - indi.g2) * (indi.angular_accel_ref.r - indi.rate_d[2] - indi.g2 * indi.du.r);
->>>>>>> master
 
 
 		/*
@@ -411,10 +352,7 @@ void controllerINDI(control_t *control, setpoint_t *setpoint,
 	control->roll = indi.u_in.p;
 	control->pitch = indi.u_in.q;
 	control->yaw  = indi.u_in.r;
-<<<<<<< HEAD
-=======
 
->>>>>>> master
 }
 
 PARAM_GROUP_START(ctrlINDI)
@@ -438,10 +376,7 @@ PARAM_ADD(PARAM_FLOAT, act_dyn_q, &indi.act_dyn.q)
 PARAM_ADD(PARAM_FLOAT, act_dyn_r, &indi.act_dyn.r)
 PARAM_ADD(PARAM_FLOAT, filt_cutoff, &indi.filt_cutoff)
 PARAM_ADD(PARAM_FLOAT, filt_cutoff_r, &indi.filt_cutoff_r)
-<<<<<<< HEAD
-=======
 PARAM_ADD(PARAM_UINT8, outerLoopActive, &outerLoopActive)
->>>>>>> master
 PARAM_GROUP_STOP(ctrlINDI)
 
 LOG_GROUP_START(ctrlINDI)

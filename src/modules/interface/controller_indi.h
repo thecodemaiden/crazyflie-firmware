@@ -33,10 +33,7 @@
 #include "param.h"
 #include "position_controller.h"
 #include "attitude_controller.h"
-<<<<<<< HEAD
-=======
 #include "position_controller_indi.h"
->>>>>>> master
 
 #define ATTITUDE_UPDATE_DT    (float)(1.0f/ATTITUDE_RATE)
 
@@ -47,15 +44,6 @@
 #define STABILIZATION_INDI_FILT_CUTOFF_R STABILIZATION_INDI_FILT_CUTOFF
 
 // these parameters are used in the filtering of the angular acceleration
-<<<<<<< HEAD
-#define STABILIZATION_INDI_G1_P 0.0034724f
-#define STABILIZATION_INDI_G1_Q 0.0052575f
-#define STABILIZATION_INDI_G1_R -0.0015942f
-#define STABILIZATION_INDI_G2_R -0.11281f
-#define STABILIZATION_INDI_REF_ERR_P 3.57f
-#define STABILIZATION_INDI_REF_ERR_Q 3.57f
-#define STABILIZATION_INDI_REF_ERR_R 3.57f
-=======
 #define STABILIZATION_INDI_G1_P 0.0066146f
 #define STABILIZATION_INDI_G1_Q 0.0052125f
 #define STABILIZATION_INDI_G1_R -0.001497f
@@ -63,7 +51,6 @@
 #define STABILIZATION_INDI_REF_ERR_P 24.0f
 #define STABILIZATION_INDI_REF_ERR_Q 24.0f
 #define STABILIZATION_INDI_REF_ERR_R 24.0f
->>>>>>> master
 #define STABILIZATION_INDI_REF_RATE_P 14.0f
 #define STABILIZATION_INDI_REF_RATE_Q 14.0f
 #define STABILIZATION_INDI_REF_RATE_R 14.0f

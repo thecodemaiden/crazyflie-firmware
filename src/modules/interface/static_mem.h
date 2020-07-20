@@ -31,8 +31,6 @@
 
 #pragma once
 
-<<<<<<< HEAD
-=======
 #include "cfassert.h"
 
 /**
@@ -76,7 +74,6 @@
 #endif
 
 
->>>>>>> master
 /**
  * @brief Creation of queues using static memory.
  *
@@ -112,12 +109,9 @@
  * // static uint8_t osSys_myQueueStorage[5 * sizeof(int)];
  * // static StaticQueue_t osSys_myQueueSMgm;
  *
-<<<<<<< HEAD
-=======
  * Note: the memory is allocated in CCM RAM. Read/write to the queue is done by copy
  * and the special properties of CCM RAM should not have any impact on the behaviour.
  *
->>>>>>> master
  * @param NAME - the name of the queue handle (xQueueHandle). The name is also used as
  * base name for the other variables that are required.
  * @param LENGTH - the length of the queue (in items)
@@ -126,13 +120,8 @@
 #define STATIC_MEM_QUEUE_ALLOC(NAME, LENGTH, ITEM_SIZE)\
   static const int osSys_ ## NAME ## Length = (LENGTH); \
   static const int osSys_ ## NAME ## ItemSize = (ITEM_SIZE); \
-<<<<<<< HEAD
-  static uint8_t osSys_ ## NAME ## Storage[(LENGTH) * (ITEM_SIZE)]; \
-  static StaticQueue_t osSys_ ## NAME ## Mgm;
-=======
   NO_DMA_CCM_SAFE_ZERO_INIT static uint8_t osSys_ ## NAME ## Storage[(LENGTH) * (ITEM_SIZE)]; \
   NO_DMA_CCM_SAFE_ZERO_INIT static StaticQueue_t osSys_ ## NAME ## Mgm;
->>>>>>> master
 
 /**
  * @brief Creates a queue using static memory
@@ -174,26 +163,18 @@
  */
 
 /**
-<<<<<<< HEAD
- * @brief Allocate variables and buffers for a task using static memory.
- *
-=======
  * @brief Allocate variables and stack for a task using static memory.
  *
  * Note: the stack memory is allocated in normal RAM while the buffers
  * are allocated in CCM RAM. The special properties of CCM RAM should not
  * have any impact on the behaviour.
 
->>>>>>> master
  * @param NAME A name used as base name for the variables that are created
  * @param STACK_DEPTH The stack depth in nr of StackType_t entries.
  */
 #define STATIC_MEM_TASK_ALLOC(NAME, STACK_DEPTH) \
   static const int osSys_ ## NAME ## StackDepth = (STACK_DEPTH); \
   static StackType_t osSys_ ## NAME ## StackBuffer[(STACK_DEPTH)]; \
-<<<<<<< HEAD
-  static StaticTask_t osSys_ ## NAME ## TaskBuffer;
-=======
   NO_DMA_CCM_SAFE_ZERO_INIT static StaticTask_t osSys_ ## NAME ## TaskBuffer;
 
 /**
@@ -211,7 +192,6 @@
   static const int osSys_ ## NAME ## StackDepth = (STACK_DEPTH); \
   NO_DMA_CCM_SAFE_ZERO_INIT static StackType_t osSys_ ## NAME ## StackBuffer[(STACK_DEPTH)]; \
   NO_DMA_CCM_SAFE_ZERO_INIT static StaticTask_t osSys_ ## NAME ## TaskBuffer;
->>>>>>> master
 
 /**
  * @brief Create a task using static memory
