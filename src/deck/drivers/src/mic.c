@@ -28,7 +28,7 @@ static float32_t fftChirped[2*BUFFER_SIZE];
 static float32_t chirpTemplate[2*BUFFER_SIZE]; // complex chirp
 
 static uint16_t chirpLen = 0;
-static uint16_t chirpSlope = 0;
+static uint16_t chirpSlope = 2000;
 
 static int8_t readyBuffer = -1; // changes to 0 or 1 as buffers are filled by DMA
 static float windowEnergy = 0;
@@ -36,9 +36,11 @@ static uint16_t lastValue = 0;
 static uint16_t nInterrupts = 0;
 static uint16_t nReads = 0;
 static uint16_t adcInterrupts = 0;
-static float filteredOut = 0;
-static float maxFreq = 0;
+static float maxFreqTop = 0;
+static float maxFreqBottom = 0;
 static float32_t maxFreqVal = 0;
+static float dfTop = 0;
+static float dfBottom = 0;
 
 static xTimerHandle timer;
 static void micReadTimer(xTimerHandle timer);
@@ -200,35 +202,25 @@ static void prepareChirpMultiplier()
 {
   // this is using a lot of RAM....
   static float32_t lChpBuffer[BUFFER_SIZE];
-  static float32_t argBuffer[BUFFER_SIZE];
+  static float32_t kBuffer[BUFFER_SIZE];
   int ii;
   float32_t chpFactor;
   // prepare the vector -N/2 .. N/2
   float32_t d = (float32_t)(BUFFER_SIZE)/(BUFFER_SIZE-1);
   for (ii=0; ii<BUFFER_SIZE; ii++) {
-    lChpBuffer[ii] = -(BUFFER_SIZE>>1) + ii*d;
+    kBuffer[ii] = -(BUFFER_SIZE>>1) + ii*d;
   }
-  
-  // copy it into the argument buffer too
-  arm_copy_f32(lChpBuffer, argBuffer, BUFFER_SIZE);
 
-  float32_t fs = (float32_t)(SAMPLE_RATE);
-  // create the chirp modulation factors (lChp)
-  chpFactor = ((float32_t)chirpSlope*BUFFER_SIZE)/(2*fs*fs);
-  arm_scale_f32(lChpBuffer, chpFactor, lChpBuffer, BUFFER_SIZE);
-
-  // make the argument of the sin/cos -- 2*pi*k/N
-  float32_t argScale = (-2*E_PI*15000/BUFFER_SIZE);
-  arm_scale_f32(argBuffer, argScale, argBuffer, BUFFER_SIZE);
+  fs = (float32_t)(SAMPLE_RATE)
+  // complex angle = 2*pi*s*k^2/(2*Fs^2)
+  arm_mult_f32(kBuffer, kBuffer, lChpBuffer, BUFFER_SIZE);
+  arm_scale_f32(lChpBuffer, ((float32_t)360.0*chirpSlope)/(2*fs*fs))
 
   // make the real and imaginary parts of the complex sinusoid
   for (ii=0; ii<BUFFER_SIZE; ii++) {
-    chirpTemplate[2*ii + 0] = arm_cos_f32(argBuffer[ii]);
-    chirpTemplate[2*ii + 1] = arm_sin_f32(argBuffer[ii]);
+    chirpTemplate[2*ii + 0] = arm_cos_f32(lChpBuffer[ii]);
+    chirpTemplate[2*ii + 1] = arm_sin_f32(lChpBuffer[ii]);
   }
-
-  // finally... chirp the complex sinusoid!
-  //XXXarm_cmplx_mult_real_f32(chirpTemplate, lChpBuffer, chirpTemplate, BUFFER_SIZE);
 
 }
 
@@ -244,6 +236,7 @@ static void updateChirpParams()
 }
 
 
+
 static void convertDataToFloat(uint16_t *dmaBuffer)
 {
   // PROCESS THE DATA QUICKLY!!
@@ -252,7 +245,6 @@ static void convertDataToFloat(uint16_t *dmaBuffer)
   for (int ii=0; ii<BUFFER_SIZE; ii++) {
     lastValue = dmaBuffer[ii];
     windowEnergy = windowEnergy + (float)lastValue-ADC_OFFSET;
-    filteredOut = 0.8f*filteredOut + 0.2f*(lastValue - ADC_OFFSET);
     fftWindow[ii] = (float32_t)lastValue - ADC_OFFSET;
   }
 }
@@ -260,6 +252,9 @@ static void convertDataToFloat(uint16_t *dmaBuffer)
 // process data windows if available
 static void processMicBuffer()
 {
+
+  //static arm_rfft_fast_instance_f32 realParams;
+  //arm_rfft_fast_init_f32(&realParams, BUFFER_SIZE);
   uint16_t *dmaBuffer = NULL;
   if (readyBuffer < 0) return;
 
@@ -274,18 +269,26 @@ static void processMicBuffer()
   // copy the ADC data as floating point
   convertDataToFloat(dmaBuffer);
   nReads = nReads+1;
+
   // multiply by the complex chirp
-  //arm_cmplx_mult_real_f32(chirpTemplate, fftWindow, fftChirped, BUFFER_SIZE);
-  arm_copy_f32(chirpTemplate, fftChirped, 2*BUFFER_SIZE);
+  arm_cmplx_mult_real_f32(chirpTemplate, fftWindow, fftChirped, BUFFER_SIZE);
   // take the fft of the chirped audio
   arm_cfft_f32(fftParams, fftChirped, 0, 0);
+  //arm_rfft_fast_f32(&realParams, fftWindow, fftChirped, 0);
   // get the (real) magnitude of the complex fft
   arm_cmplx_mag_f32(fftChirped, fftWindow, BUFFER_SIZE);
-  // get the max frequency detected in one half of the fft, above START_BIN
+
   uint32_t maxBin = 0;
   arm_max_f32(fftWindow+START_BIN, BUFFER_SIZE/2 - START_BIN, &maxFreqVal, &maxBin);
-  // calculate the max frequency from the bin
-  maxFreq = (float)(maxBin+START_BIN)*((float)SAMPLE_RATE/BUFFER_SIZE);
+  
+  float lastTop = maxFreqTop;
+  maxFreqTop = (float)(maxBin+START_BIN)*((float)SAMPLE_RATE/BUFFER_SIZE);
+  dfTop = maxFreqTop - lastTop;
+
+  float lastBottom = maxFreqBottom;
+  arm_max_f32(fftWindow+BUFFER_SIZE/2, BUFFER_SIZE/2 - START_BIN, &maxFreqVal, &maxBin);
+  maxFreqBottom =  (float)(maxBin) *((float)SAMPLE_RATE/BUFFER_SIZE) - (float)(SAMPLE_RATE/2);
+  dfBottom = maxFreqBottom - lastBottom;
 }
 
 static void micReadTimer(xTimerHandle timer)
@@ -308,10 +311,12 @@ DECK_DRIVER(micDriver);
 
 LOG_GROUP_START(mic)
   LOG_ADD(LOG_FLOAT, energy, &windowEnergy)
-  LOG_ADD(LOG_FLOAT, filter, &filteredOut)
   LOG_ADD(LOG_UINT16, rawRead, &lastValue)
   LOG_ADD(LOG_UINT16, triggers, &nInterrupts)
-  LOG_ADD(LOG_FLOAT, maxFreq, &maxFreq) 
+  LOG_ADD(LOG_FLOAT, topFreq, &maxFreqTop) 
+  LOG_ADD(LOG_FLOAT, bottomFreq, &maxFreqBottom) 
+  LOG_ADD(LOG_FLOAT, dBottom, &dfBottom) 
+  LOG_ADD(LOG_FLOAT, dTop, &dfTop) 
 LOG_GROUP_STOP(mic)
 
 /** 
