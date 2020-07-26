@@ -18,37 +18,44 @@ static bool isTimerInit = false;
 static bool isAdcInit = false;
 static bool isDmaInit = false;
 static bool isGpioInit = false;
+static bool isFftInit = false;
 
 static uint16_t dmaBufferBottom[BUFFER_SIZE];
 static uint16_t dmaBufferTop[BUFFER_SIZE];
 //TODO: when we premultiply with chirp it will be twice as long
 // and we will need another buffer of the same size for the chirp coeffs
 static float32_t fftWindow[BUFFER_SIZE];
+static float32_t fftReal[BUFFER_SIZE];
 static float32_t fftChirped[2*BUFFER_SIZE];
 static float32_t chirpTemplate[2*BUFFER_SIZE]; // complex chirp
-
-static uint16_t chirpLen = 0;
-static uint16_t chirpSlope = 2000;
+//static uint16_t chirpLen = 0;
+//static uint16_t chirpSlope = 2000;
 
 static int8_t readyBuffer = -1; // changes to 0 or 1 as buffers are filled by DMA
 static float windowEnergy = 0;
 static uint16_t lastValue = 0;
-static uint16_t nInterrupts = 0;
 static uint16_t nReads = 0;
-static uint16_t adcInterrupts = 0;
+static uint16_t nIdle = 0;
+static volatile uint16_t adcInterrupts = 0;
 static float maxFreqTop = 0;
 static float maxFreqBottom = 0;
 static float32_t maxFreqVal = 0;
 static float dfTop = 0;
 static float dfBottom = 0;
+arm_rfft_fast_instance_f32 realParams;
+static float maxFreqReal = 0;
 
 static xTimerHandle timer;
 static void micReadTimer(xTimerHandle timer);
+static void prepareChirpMultiplier();
 
 static NVIC_InitTypeDef NVIC_InitStructure;
-const static arm_cfft_instance_f32*  fftParams = &arm_cfft_sR_f32_len1024;
+const static arm_cfft_instance_f32*  fftParams;
 
 #define E_PI ((float32_t)3.14159265)
+
+#define BIN_TO_FREQ(x) ((float)(x)*SAMPLE_RATE/BUFFER_SIZE)
+
 static void micGpioInit(void)
 {
   /* Populate structure with RESET values. */
@@ -178,6 +185,42 @@ static void micSamplerInit(void)
   isTimerInit = true;
 }
 
+static void fftInit()
+{
+  uint16_t length = BUFFER_SIZE;
+  switch (length) {
+    case 16:
+      fftParams = &arm_cfft_sR_f32_len16;
+      break;
+    case 32:
+      fftParams = &arm_cfft_sR_f32_len32;
+      break;
+    case 64:
+      fftParams = &arm_cfft_sR_f32_len64;
+      break;
+    case 128:
+      fftParams = &arm_cfft_sR_f32_len128;
+      break;
+    case 256:
+      fftParams = &arm_cfft_sR_f32_len256;
+      break;
+    case 512:
+      fftParams = &arm_cfft_sR_f32_len512;
+      break;
+    case 1024:
+      fftParams = &arm_cfft_sR_f32_len1024;
+      break;
+    case 2048:
+      fftParams = &arm_cfft_sR_f32_len2048;
+      break;
+    case 4096:
+      fftParams = &arm_cfft_sR_f32_len4096;
+      break;
+  }
+  isFftInit = (arm_rfft_fast_init_f32(&realParams, BUFFER_SIZE)) == ARM_MATH_SUCCESS;
+
+}
+
 void micInit(DeckInfo *info)
 {
   if (isInit) return;
@@ -185,7 +228,9 @@ void micInit(DeckInfo *info)
   if (!isAdcInit) micAdcInit();
   if (!isDmaInit) micDmaInit();
   if (!isTimerInit) micSamplerInit();
+  if (!isFftInit) fftInit();
 
+  prepareChirpMultiplier();
   isInit = true;
   timer = xTimerCreate("micTimer", M2T(10),pdTRUE,NULL,micReadTimer);
   xTimerStart(timer,100);
@@ -197,55 +242,40 @@ bool micTest()
   reallyDidInit &= (DMA_GetCmdStatus(DMA2_Stream1)==ENABLE); 
   return isDmaInit && reallyDidInit; 
 }
-
 static void prepareChirpMultiplier()
 {
-  // this is using a lot of RAM....
-  static float32_t lChpBuffer[BUFFER_SIZE];
-  static float32_t kBuffer[BUFFER_SIZE];
-  int ii;
-  float32_t chpFactor;
-  // prepare the vector -N/2 .. N/2
-  float32_t d = (float32_t)(BUFFER_SIZE)/(BUFFER_SIZE-1);
+ int ii;
   for (ii=0; ii<BUFFER_SIZE; ii++) {
-    kBuffer[ii] = -(BUFFER_SIZE>>1) + ii*d;
+      float32_t ts = ((float32_t)ii)/SAMPLE_RATE;
+      float32_t phase = E_PI*2000.0f*ts*ts;
+      chirpTemplate[2*ii] = arm_cos_f32(phase);
+      chirpTemplate[2*ii+1] = arm_sin_f32(phase);
   }
-
-  fs = (float32_t)(SAMPLE_RATE)
-  // complex angle = 2*pi*s*k^2/(2*Fs^2)
-  arm_mult_f32(kBuffer, kBuffer, lChpBuffer, BUFFER_SIZE);
-  arm_scale_f32(lChpBuffer, ((float32_t)360.0*chirpSlope)/(2*fs*fs))
-
-  // make the real and imaginary parts of the complex sinusoid
-  for (ii=0; ii<BUFFER_SIZE; ii++) {
-    chirpTemplate[2*ii + 0] = arm_cos_f32(lChpBuffer[ii]);
-    chirpTemplate[2*ii + 1] = arm_sin_f32(lChpBuffer[ii]);
-  }
-
 }
 
-static void updateChirpParams()
-{
-  const MotorSoundParameters *p = currentMotorParams();
-
-  bool slopeChanged = (p->chirpSlope != chirpSlope);
-  chirpLen = p->chirpLen;
-  chirpSlope = p->chirpSlope;
-
-  if (slopeChanged) prepareChirpMultiplier();
-}
-
+//
+//static void updateChirpParams()
+//{
+//  const MotorSoundParameters *p = currentMotorParams();
+//
+//  bool slopeChanged = (p->chirpSlope != chirpSlope);
+//  chirpLen = p->chirpLen;
+//  chirpSlope = p->chirpSlope;
+//
+//  if (slopeChanged) prepareChirpMultiplier();
+//}
+//
 
 
 static void convertDataToFloat(uint16_t *dmaBuffer)
 {
   // PROCESS THE DATA QUICKLY!!
   windowEnergy = 0;
-  nInterrupts = nInterrupts+1;
+  nReads = nReads+1;
   for (int ii=0; ii<BUFFER_SIZE; ii++) {
     lastValue = dmaBuffer[ii];
     windowEnergy = windowEnergy + (float)lastValue-ADC_OFFSET;
-    fftWindow[ii] = (float32_t)lastValue - ADC_OFFSET;
+    fftWindow[ii] = ((float32_t)lastValue - ADC_OFFSET)/ADC_OFFSET;
   }
 }
 
@@ -253,41 +283,41 @@ static void convertDataToFloat(uint16_t *dmaBuffer)
 static void processMicBuffer()
 {
 
-  //static arm_rfft_fast_instance_f32 realParams;
-  //arm_rfft_fast_init_f32(&realParams, BUFFER_SIZE);
   uint16_t *dmaBuffer = NULL;
-  if (readyBuffer < 0) return;
-
+  if (readyBuffer < 0) {
+    nIdle += 1;
+    return;
+  }
   if (readyBuffer == 0) {
     dmaBuffer = dmaBufferTop;
   }else{
     dmaBuffer = dmaBufferBottom;
   }
-  updateChirpParams();
   readyBuffer = -1;
 
+  static float32_t tempBuffer[2*BUFFER_SIZE];
+  uint32_t maxBin = 0;
   // copy the ADC data as floating point
   convertDataToFloat(dmaBuffer);
-  nReads = nReads+1;
 
-  // multiply by the complex chirp
-  arm_cmplx_mult_real_f32(chirpTemplate, fftWindow, fftChirped, BUFFER_SIZE);
-  // take the fft of the chirped audio
-  arm_cfft_f32(fftParams, fftChirped, 0, 0);
-  //arm_rfft_fast_f32(&realParams, fftWindow, fftChirped, 0);
-  // get the (real) magnitude of the complex fft
-  arm_cmplx_mag_f32(fftChirped, fftWindow, BUFFER_SIZE);
+  arm_cmplx_mult_real_f32(chirpTemplate, fftWindow, tempBuffer, BUFFER_SIZE);
+  // find the fft max bin without chirping
+  arm_rfft_fast_f32(&realParams, fftWindow, fftReal, 0);
+  arm_cmplx_mag_f32(fftReal, fftChirped, BUFFER_SIZE);
+  arm_max_f32(fftChirped+START_BIN, BUFFER_SIZE/2-START_BIN, &maxFreqVal, &maxBin);
+  maxFreqReal = BIN_TO_FREQ(maxBin+START_BIN);
 
-  uint32_t maxBin = 0;
-  arm_max_f32(fftWindow+START_BIN, BUFFER_SIZE/2 - START_BIN, &maxFreqVal, &maxBin);
-  
+  // find the fft max bin with chirping
+  arm_cfft_f32(fftParams, tempBuffer, 0, 1);
+  arm_cmplx_mag_f32(tempBuffer, fftChirped, BUFFER_SIZE);
+  arm_max_f32(fftChirped+START_BIN, BUFFER_SIZE/2 - START_BIN, &maxFreqVal, &maxBin);
   float lastTop = maxFreqTop;
-  maxFreqTop = (float)(maxBin+START_BIN)*((float)SAMPLE_RATE/BUFFER_SIZE);
+  maxFreqTop = BIN_TO_FREQ(maxBin+START_BIN);
   dfTop = maxFreqTop - lastTop;
 
+  arm_max_f32(fftChirped+BUFFER_SIZE/2, BUFFER_SIZE/2 - START_BIN, &maxFreqVal, &maxBin);
   float lastBottom = maxFreqBottom;
-  arm_max_f32(fftWindow+BUFFER_SIZE/2, BUFFER_SIZE/2 - START_BIN, &maxFreqVal, &maxBin);
-  maxFreqBottom =  (float)(maxBin) *((float)SAMPLE_RATE/BUFFER_SIZE) - (float)(SAMPLE_RATE/2);
+  maxFreqBottom =  BIN_TO_FREQ(maxBin) - SAMPLE_RATE/2.0f;
   dfBottom = maxFreqBottom - lastBottom;
 }
 
@@ -312,8 +342,11 @@ DECK_DRIVER(micDriver);
 LOG_GROUP_START(mic)
   LOG_ADD(LOG_FLOAT, energy, &windowEnergy)
   LOG_ADD(LOG_UINT16, rawRead, &lastValue)
-  LOG_ADD(LOG_UINT16, triggers, &nInterrupts)
+  LOG_ADD(LOG_UINT16, triggers, &adcInterrupts)
+  LOG_ADD(LOG_UINT16, bufReads, &nReads)
+  LOG_ADD(LOG_UINT16, idleCount, &nIdle)
   LOG_ADD(LOG_FLOAT, topFreq, &maxFreqTop) 
+  LOG_ADD(LOG_FLOAT, rawFreq, &maxFreqReal) 
   LOG_ADD(LOG_FLOAT, bottomFreq, &maxFreqBottom) 
   LOG_ADD(LOG_FLOAT, dBottom, &dfBottom) 
   LOG_ADD(LOG_FLOAT, dTop, &dfTop) 
@@ -327,7 +360,7 @@ void __attribute__((used)) ADC_IRQHandler(void)
   FlagStatus isOverrun = ADC_GetFlagStatus(ADC3, ADC_FLAG_OVR);
   adcInterrupts += 1;
   if (isOverrun) {
-    nInterrupts = 0xdead;
+    adcInterrupts = 0xdead;
     // clear the flag
     ADC_ClearFlag(ADC3, ADC_FLAG_OVR);
     ADC_ClearITPendingBit(ADC3, ADC_IT_OVR);
