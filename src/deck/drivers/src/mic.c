@@ -28,8 +28,8 @@ static float32_t fftWindow[BUFFER_SIZE];
 static float32_t fftReal[BUFFER_SIZE];
 static float32_t fftChirped[2*BUFFER_SIZE];
 static float32_t chirpTemplate[2*BUFFER_SIZE]; // complex chirp
-//static uint16_t chirpLen = 0;
-//static uint16_t chirpSlope = 2000;
+static uint16_t chirpLen = 750;
+static uint16_t chirpSlope = 2000;
 
 static int8_t readyBuffer = -1; // changes to 0 or 1 as buffers are filled by DMA
 static float windowEnergy = 0;
@@ -42,8 +42,20 @@ static float maxFreqBottom = 0;
 static float32_t maxFreqVal = 0;
 static float dfTop = 0;
 static float dfBottom = 0;
-arm_rfft_fast_instance_f32 realParams;
+static float maxTopVal = 0;
+static float maxBottomVal = 0;
+static arm_rfft_fast_instance_f32 realParams;
 static float maxFreqReal = 0;
+static uint32_t taskTime=0;
+static uint8_t bitPointer=0;
+static uint8_t msgPointer=0;
+#define MSG_BUFFER_SIZE 4
+uint16_t inOneCount = 0;
+uint16_t inZeroCount = 0;
+static float freqDelta = 0;
+static uint16_t maxSymbolCount = 0;
+static uint16_t minSymbolCount = 0;
+static uint8_t msgBuffer[MSG_BUFFER_SIZE] = {0};
 
 static xTimerHandle timer;
 static void micReadTimer(xTimerHandle timer);
@@ -247,10 +259,14 @@ static void prepareChirpMultiplier()
  int ii;
   for (ii=0; ii<BUFFER_SIZE; ii++) {
       float32_t ts = ((float32_t)ii)/SAMPLE_RATE;
-      float32_t phase = E_PI*2000.0f*ts*ts;
+      float32_t phase = E_PI*chirpSlope*ts*ts;
       chirpTemplate[2*ii] = arm_cos_f32(phase);
       chirpTemplate[2*ii+1] = arm_sin_f32(phase);
   }
+  // expected change in frequency during a window
+  freqDelta = ((float32_t)BUFFER_SIZE)*chirpSlope/SAMPLE_RATE;
+  maxSymbolCount = (uint16_t)((float32_t)chirpLen/1000.0f*SAMPLE_RATE/BUFFER_SIZE);
+  minSymbolCount = (uint16_t)(0.6f*maxSymbolCount);
 }
 
 //
@@ -279,6 +295,67 @@ static void convertDataToFloat(uint16_t *dmaBuffer)
   }
 }
 
+static void insertMsgBit(uint8_t bit)
+{
+  uint8_t shiftedBit = bit << bitPointer;
+  uint8_t maskedMsg = msgBuffer[msgPointer] & ~(1 << bitPointer);
+  msgBuffer[msgPointer] = maskedMsg | shiftedBit;
+  bitPointer++;
+  if (bitPointer >= 8) {
+    bitPointer = 0;
+    msgPointer++;
+  }
+  if (msgPointer >= MSG_BUFFER_SIZE) {
+    msgPointer = 0;
+  }
+}
+
+static void decodeChirps()
+{
+  static float pThreshold = 5.5;
+  bool inOne = false;
+  bool inZero = false;
+  float freqError = 0.5f*freqDelta;
+
+  if ((dfTop < 0) && (maxTopVal > pThreshold) &&
+      (dfTop+freqDelta > -freqError) && (dfTop+freqDelta < freqError)){
+    inOne = true;
+  }
+  if ((dfBottom < 0) && (maxBottomVal > pThreshold) &&
+      (dfBottom+freqDelta > -freqError) && (dfBottom+freqDelta < freqError)){
+    inZero = true;
+  }
+  if (inOne && !inZero) inOneCount++;
+  if (inZero && !inOne) inZeroCount++;
+
+  if (inOneCount >= maxSymbolCount) {
+    inOneCount = 0;
+    inZeroCount = 0;
+    insertMsgBit(1);
+    return;
+  }
+
+  if (inZeroCount >= maxSymbolCount) {
+    inOneCount = 0;
+    inZeroCount = 0;
+    insertMsgBit(0);
+    return;
+  }
+
+  if (inOneCount > 0 && inZero) {
+    if (inOneCount >= minSymbolCount) insertMsgBit(1);
+    inOneCount = 0;
+    return;
+  }
+
+  if (inZeroCount > 0 && inOne) {
+    if (inZeroCount >= minSymbolCount) insertMsgBit(0);
+    inZeroCount = 0;
+    return;
+  }
+
+}
+
 // process data windows if available
 static void processMicBuffer()
 {
@@ -295,6 +372,7 @@ static void processMicBuffer()
   }
   readyBuffer = -1;
 
+  uint32_t taskStart = xTaskGetTickCount();
   static float32_t tempBuffer[2*BUFFER_SIZE];
   uint32_t maxBin = 0;
   // copy the ADC data as floating point
@@ -308,17 +386,28 @@ static void processMicBuffer()
   maxFreqReal = BIN_TO_FREQ(maxBin+START_BIN);
 
   // find the fft max bin with chirping
+  // TODO: for multiple transmissions, just do this max and min in each bin
   arm_cfft_f32(fftParams, tempBuffer, 0, 1);
   arm_cmplx_mag_f32(tempBuffer, fftChirped, BUFFER_SIZE);
-  arm_max_f32(fftChirped+START_BIN, BUFFER_SIZE/2 - START_BIN, &maxFreqVal, &maxBin);
+  arm_max_f32(fftChirped+START_BIN, BUFFER_SIZE/2 - START_BIN, &maxTopVal, &maxBin);
+  float meanValTop = 0;
+  arm_mean_f32(fftChirped+START_BIN, BUFFER_SIZE/2 - START_BIN, &meanValTop);
+  maxTopVal = maxTopVal/meanValTop;
   float lastTop = maxFreqTop;
   maxFreqTop = BIN_TO_FREQ(maxBin+START_BIN);
   dfTop = maxFreqTop - lastTop;
 
-  arm_max_f32(fftChirped+BUFFER_SIZE/2, BUFFER_SIZE/2 - START_BIN, &maxFreqVal, &maxBin);
+  arm_max_f32(fftChirped+BUFFER_SIZE/2, BUFFER_SIZE/2 - START_BIN, &maxBottomVal, &maxBin);
+  float meanValBottom = 0;
+  arm_mean_f32(fftChirped+BUFFER_SIZE/2, BUFFER_SIZE/2 - START_BIN, &meanValBottom);
+  maxBottomVal = maxBottomVal/meanValBottom;
   float lastBottom = maxFreqBottom;
   maxFreqBottom =  BIN_TO_FREQ(maxBin) - SAMPLE_RATE/2.0f;
   dfBottom = maxFreqBottom - lastBottom;
+
+  decodeChirps();
+  uint32_t taskEnd = xTaskGetTickCount();
+  taskTime = taskEnd - taskStart;
 }
 
 static void micReadTimer(xTimerHandle timer)
@@ -339,15 +428,29 @@ const DeckDriver micDriver = {
 
 DECK_DRIVER(micDriver);
 
+LOG_GROUP_START(sndDebug)
+  LOG_ADD(LOG_UINT16, bufReads, &nReads)
+  LOG_ADD(LOG_UINT16, triggers, &adcInterrupts)
+  LOG_ADD(LOG_UINT16, idleCount, &nIdle)
+  LOG_ADD(LOG_UINT32, taskTime, &taskTime)
+LOG_GROUP_STOP(sndDebug)
+
+LOG_GROUP_START(sndMsg)
+  LOG_ADD(LOG_UINT8, msg1, msgBuffer)
+  LOG_ADD(LOG_UINT8, msg2, msgBuffer+1)
+  LOG_ADD(LOG_UINT8, msg3, msgBuffer+2)
+  LOG_ADD(LOG_UINT8, msg4, msgBuffer+3)
+  LOG_ADD(LOG_FLOAT, df, &freqDelta)
+LOG_GROUP_STOP(sndMsg)
+
 LOG_GROUP_START(mic)
   LOG_ADD(LOG_FLOAT, energy, &windowEnergy)
   LOG_ADD(LOG_UINT16, rawRead, &lastValue)
-  LOG_ADD(LOG_UINT16, triggers, &adcInterrupts)
-  LOG_ADD(LOG_UINT16, bufReads, &nReads)
-  LOG_ADD(LOG_UINT16, idleCount, &nIdle)
   LOG_ADD(LOG_FLOAT, topFreq, &maxFreqTop) 
   LOG_ADD(LOG_FLOAT, rawFreq, &maxFreqReal) 
   LOG_ADD(LOG_FLOAT, bottomFreq, &maxFreqBottom) 
+  LOG_ADD(LOG_FLOAT, topVal, &maxTopVal) 
+  LOG_ADD(LOG_FLOAT, bottomVal, &maxBottomVal) 
   LOG_ADD(LOG_FLOAT, dBottom, &dfBottom) 
   LOG_ADD(LOG_FLOAT, dTop, &dfTop) 
 LOG_GROUP_STOP(mic)
