@@ -5,6 +5,7 @@
 #include "estimator.h"
 #include "estimator_complementary.h"
 #include "estimator_kalman.h"
+#include "estimator_camera.h"
 
 #define DEFAULT_ESTIMATOR complementaryEstimator
 static StateEstimatorType currentEstimator = anyEstimator;
@@ -80,6 +81,22 @@ static EstimatorFcns estimatorFunctions[] = {
         .estimatorEnqueueYawError = estimatorKalmanEnqueueYawError,
         .estimatorEnqueueSweepAngles = estimatorKalmanEnqueueSweepAngles,
     },
+    {
+        .init = estimatorCameraInit,
+        .deinit = NOT_IMPLEMENTED,
+        .test = estimatorCameraTest,
+        .update = estimatorCamera,
+        .name = "ExtCamera",
+        .estimatorEnqueueTDOA = NOT_IMPLEMENTED,
+        .estimatorEnqueuePosition = estimatorCameraEnqueuePosition,
+        .estimatorEnqueuePose = NOT_IMPLEMENTED,
+        .estimatorEnqueueDistance = NOT_IMPLEMENTED,
+        .estimatorEnqueueTOF = NOT_IMPLEMENTED,
+        .estimatorEnqueueAbsoluteHeight = NOT_IMPLEMENTED,
+        .estimatorEnqueueFlow = NOT_IMPLEMENTED,
+        .estimatorEnqueueYawError = NOT_IMPLEMENTED,
+        .estimatorEnqueueSweepAngles = NOT_IMPLEMENTED,
+    }, // Camera estimator
 };
 
 void stateEstimatorInit(StateEstimatorType estimator) {

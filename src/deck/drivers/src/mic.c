@@ -317,11 +317,11 @@ static void decodeChirps()
   bool inZero = false;
   float freqError = 0.5f*freqDelta;
 
-  if ((dfTop < 0) && (maxTopVal > pThreshold) &&
+  if ((dfTop <= 0) && (maxTopVal > pThreshold) &&
       (dfTop+freqDelta > -freqError) && (dfTop+freqDelta < freqError)){
     inOne = true;
   }
-  if ((dfBottom < 0) && (maxBottomVal > pThreshold) &&
+  if ((dfBottom <= 0) && (maxBottomVal > pThreshold) &&
       (dfBottom+freqDelta > -freqError) && (dfBottom+freqDelta < freqError)){
     inZero = true;
   }

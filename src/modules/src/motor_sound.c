@@ -20,7 +20,7 @@
 #include "motors.h"
 // TODO: convert all variables to camelCase
 
-#define MSG_LENGTH 8
+#define MSG_LENGTH 4
 // how many task ticks to wait between chirp symbols
 #define PAUSE_LENGTH 2 
 static struct {
